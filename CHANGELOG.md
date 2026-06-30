@@ -6,6 +6,8 @@ All notable user-visible changes are recorded here.
 
 ### Stack
 
+- Added Ahara CI/CD wiring for local validation, GHCR image publishing, and Komodo deployment from `main`.
+- Updated the deployed UI port binding to the VPN-only TrueNAS LAN address.
 - Bound all InfluxDB writer tokens to the shared observability SSM parameter `/ahara/observability/influxdb-admin-token`.
 
 ### Firmware

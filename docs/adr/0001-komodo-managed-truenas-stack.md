@@ -11,7 +11,9 @@ The Ahara platform standard for TrueNAS services is Docker Compose managed by Ko
 
 ## Decision
 
-Package each deployable component as a self-contained image and deploy the stack through Komodo using `compose.yaml`, `${IMAGE_TAG}`, and `secret-paths.yml`.
+Package each deployable component as a self-contained image and deploy the stack through Komodo using `compose.yaml`, `${IMAGE_TAG}`, `platform.yml`, and `secret-paths.yml`.
+
+Expose the management UI only on the TrueNAS LAN/VPN address. Do not register a reverse-proxy route unless the access model changes.
 
 ## Alternatives considered
 
@@ -21,4 +23,4 @@ Package each deployable component as a self-contained image and deploy the stack
 
 ## Consequences
 
-Each component has its own Docker context and can be tested independently. Runtime secrets are resolved by the deploy path rather than stored in files. Compose validation requires placeholder values in `.env.example`.
+Each component has its own Docker context and can be tested independently. Runtime secrets are resolved by the deploy path rather than stored in files. Compose validation requires placeholder values in `.env.example`. The deployed UI remains reachable only from the LAN or WireGuard VPN.

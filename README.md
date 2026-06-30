@@ -34,7 +34,9 @@ make ci
 
 ## Deployment
 
-The deployable surface is [compose.yaml](compose.yaml). Komodo runs the stack on TrueNAS and receives secret-backed environment variables from [secret-paths.yml](secret-paths.yml), following the Ahara TrueNAS deployment pattern in `../ahara/TRUENAS-DEPLOY.md`.
+The deployable surface is [compose.yaml](compose.yaml). [platform.yml](platform.yml) and [.github/workflows/ci.yml](.github/workflows/ci.yml) use the shared Ahara TrueNAS workflow to build GHCR images, resolve [secret-paths.yml](secret-paths.yml), and deploy the Komodo stack from `main`.
+
+The stack is VPN-only like Harbor: `volt-event` binds to `192.168.66.3:8085`, and this repo does not register an Ahara reverse-proxy route.
 
 ## License
 

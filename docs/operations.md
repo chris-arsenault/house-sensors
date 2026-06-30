@@ -8,7 +8,11 @@ Komodo deploys [compose.yaml](../compose.yaml) on TrueNAS. The stack follows the
 | ---- | ---- |
 | `environment-sensors` | Host network for UDP discovery and device polling. |
 | `volt` | Host network for Kasa discovery and polling. |
-| `volt-event` | Host port `8085` mapped to container port `80`. |
+| `volt-event` | TrueNAS LAN address `192.168.66.3:8085` mapped to container port `80`. |
+
+Deploys run from the shared Ahara workflow declared by [.github/workflows/ci.yml](../.github/workflows/ci.yml) and [platform.yml](../platform.yml). The workflow builds the component images, pushes them to GHCR under `ghcr.io/chris-arsenault/house-sensors/...`, sets `IMAGE_TAG` to the git SHA, resolves SSM-backed variables, and asks Komodo to deploy.
+
+The stack is intentionally VPN-only. It does not have a `reverse_proxy_routes` entry in `ahara-infra`; reach `volt-event` through the LAN or WireGuard VPN at `http://192.168.66.3:8085/`.
 
 ## Secrets
 

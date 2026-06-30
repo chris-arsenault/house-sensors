@@ -1,6 +1,6 @@
 services:
   environment-sensors:
-    image: ghcr.io/chris-arsenault/house-sensors/environment-sensors:${IMAGE_TAG}
+    image: ghcr.io/chris-arsenault/house-sensors/collectors/environment-sensors:${IMAGE_TAG:-latest}
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
@@ -16,7 +16,7 @@ services:
       DEVICE_PASS: "${ENV_SENSOR_DEVICE_PASS}"
 
   volt:
-    image: ghcr.io/chris-arsenault/house-sensors/volt:${IMAGE_TAG}
+    image: ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG:-latest}
     container_name: volt
     init: true
     restart: unless-stopped
@@ -34,7 +34,7 @@ services:
       KASA_PASSWORD: "${KASA_PASSWORD}"
 
   volt-event:
-    image: ghcr.io/chris-arsenault/house-sensors/volt-event:${IMAGE_TAG}
+    image: ghcr.io/chris-arsenault/house-sensors/management/volt-event:${IMAGE_TAG:-latest}
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
@@ -46,4 +46,4 @@ services:
       INFLUX_BUCKET: "voltage-data"
       INFLUX_TOKEN: "${VOLT_EVENT_INFLUX_TOKEN}"
     ports:
-      - "8085:80"
+      - "192.168.66.3:8085:80"

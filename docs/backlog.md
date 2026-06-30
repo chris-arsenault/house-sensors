@@ -4,10 +4,8 @@ Planned-but-not-built work. Each item is a positive assertion of future-state be
 
 ## Platform
 
-- Add `platform.yml` for the Ahara shared workflow with three TrueNAS images.
-- Add `.github/workflows/ci.yml` that calls `chris-arsenault/ahara/.github/workflows/ci.yml@main`.
-- Register the project with the Ahara control-layer deployer role for Komodo deployment.
-- Add reverse proxy routing for `volt-event` when the UI is exposed outside the TrueNAS network.
+- Add deployment smoke checks through the VPN-only UI endpoint at `192.168.66.3:8085`.
+- Add reverse proxy routing for `volt-event` only if the UI is intentionally exposed outside the TrueNAS LAN/VPN network.
 
 ## Sensors
 

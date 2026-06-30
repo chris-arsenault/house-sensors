@@ -1,0 +1,12 @@
+project: house-sensors
+prefix: house-sensors
+stack:
+  - vendor
+truenas: true
+truenas_compose_path: compose.yaml
+truenas_compose_check_paths:
+  - compose.yaml
+images:
+  - collectors/environment-sensors
+  - collectors/volt
+  - management/volt-event

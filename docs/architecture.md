@@ -6,9 +6,9 @@ House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker C
 
 | Service | Source | Image | Runtime network |
 | ---- | ---- | ---- | ---- |
-| `environment-sensors` | `collectors/environment-sensors/` | `ghcr.io/chris-arsenault/house-sensors/environment-sensors:${IMAGE_TAG}` | `host` |
-| `volt` | `collectors/volt/` | `ghcr.io/chris-arsenault/house-sensors/volt:${IMAGE_TAG}` | `host` |
-| `volt-event` | `management/volt-event/` | `ghcr.io/chris-arsenault/house-sensors/volt-event:${IMAGE_TAG}` | Published on host port `8085` |
+| `environment-sensors` | `collectors/environment-sensors/` | `ghcr.io/chris-arsenault/house-sensors/collectors/environment-sensors:${IMAGE_TAG}` | `host` |
+| `volt` | `collectors/volt/` | `ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG}` | `host` |
+| `volt-event` | `management/volt-event/` | `ghcr.io/chris-arsenault/house-sensors/management/volt-event:${IMAGE_TAG}` | Published on `192.168.66.3:8085` |
 
 ## Firmware
 
@@ -23,6 +23,8 @@ The firmware exposes `/sensors` with temperature, humidity, pressure, timestamps
 `volt` discovers authenticated Kasa devices with energy-monitoring support, reads voltage/current/power/total energy data, and writes points to the `voltage-data` bucket.
 
 `volt-event` serves a static event logger UI. Browser requests post line protocol to `/api/influx/write`; nginx proxies those writes to InfluxDB with the token supplied by Komodo.
+
+The stack follows Harbor's VPN-only TrueNAS pattern. The UI is reachable on the TrueNAS LAN/VPN address, and no `reverse_proxy_routes` entry is registered in `ahara-infra`.
 
 ## Configuration
 
@@ -44,4 +46,4 @@ Firmware device credentials are supplied through an ignored `secrets.py` copied 
 
 Each component builds from its own directory. The Python collector images install only their component requirements and copy the collector source into `/app`. The nginx image copies `index.html` and `nginx.conf.template` into the image and validates the rendered nginx config during the build.
 
-The stack uses `${IMAGE_TAG}` so all services deploy the same git SHA when published by the Ahara TrueNAS workflow.
+The stack uses `${IMAGE_TAG}` so all services deploy the same git SHA when published by the Ahara TrueNAS workflow. Local Compose rendering falls back to `latest` if `IMAGE_TAG` is not set.

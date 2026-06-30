@@ -32,6 +32,8 @@ TrueNAS-hosted environment sensor stack with MicroPython firmware, Python collec
 | Path | Purpose |
 | ---- | ---- |
 | `compose.yaml` | Komodo-deployed TrueNAS stack definition. |
+| `platform.yml` | Ahara CI/CD manifest for the Komodo deploy path. |
+| `.github/workflows/ci.yml` | Local repo checks plus the shared Ahara CI/CD workflow. |
 | `secret-paths.yml` | SSM parameter paths for Komodo stack environment variables. |
 | `.env.example` | Safe local placeholders for Compose validation. |
 | `firmware/atoms3u-env3/` | MicroPython firmware for M5 AtomS3U ENV-III sensor devices. |

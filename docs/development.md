@@ -25,6 +25,14 @@ This command runs:
 | Tests | `python3 -m pytest` |
 | Image builds | `docker build` for every component image |
 
+## CI/CD
+
+The caller workflow in `.github/workflows/ci.yml` runs the repo's local gate first, then calls `chris-arsenault/ahara/.github/workflows/ci.yml@main`.
+
+`platform.yml` declares `stack: [vendor]` because the repository has several component image contexts instead of the shared workflow's single Python backend layout. The shared workflow still validates Compose, builds and pushes the images listed in `platform.yml`, resolves `secret-paths.yml`, and deploys through Komodo on `main`.
+
+The deployed service is VPN-only. Do not add an Ahara reverse-proxy route unless the deployment model changes intentionally.
+
 ## Adding Collector Code
 
 Keep each deployable collector in its own component directory under `collectors/`. A collector directory contains:
