@@ -13,29 +13,6 @@ permissions:
   packages: write
 
 jobs:
-  local-checks:
-    name: Local checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install dev dependencies
-        run: make dev-install
-
-      - name: Lint
-        run: make lint
-
-      - name: Test
-        run: make test
-
-      - name: Build images
-        run: make docker-build-images
-
   ci:
-    needs: local-checks
     uses: chris-arsenault/ahara/.github/workflows/ci.yml@main
     secrets: inherit
