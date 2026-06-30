@@ -2,6 +2,17 @@
 
 All notable user-visible changes are recorded here.
 
+## v0.2.0 - 2026-06-30
+
+### Stack
+
+- Bound all InfluxDB writer tokens to the shared observability SSM parameter `/ahara/observability/influxdb-admin-token`.
+
+### Firmware
+
+- Added AtomS3U ENV-III MicroPython firmware with UDP discovery, Basic Auth HTTP API, sensor reads, NTP timestamps, and persistent tags.
+- Added firmware-local secret templating and syntax validation in `make ci`.
+
 ## v0.1.0 - 2026-06-30
 
 ### Stack

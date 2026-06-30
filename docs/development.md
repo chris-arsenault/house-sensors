@@ -20,6 +20,7 @@ This command runs:
 | ---- | ---- |
 | Compose validation | `docker compose --env-file .env.example -f compose.yaml config` |
 | Python lint | `python3 -m ruff check collectors tests` |
+| Firmware syntax | `python3 -c "compile(...)"` |
 | Shell syntax | `sh -n management/volt-event/docker-entrypoint.sh` |
 | Tests | `python3 -m pytest` |
 | Image builds | `docker build` for every component image |
@@ -36,6 +37,18 @@ Keep each deployable collector in its own component directory under `collectors/
 | `.dockerignore` | Build-context exclusions. |
 
 Add unit tests for parsing, conversion, and config behavior under `tests/`. Keep tests network-free.
+
+## Adding Firmware Code
+
+Keep device firmware under `firmware/<device>/`. A firmware directory contains:
+
+| File | Purpose |
+| ---- | ---- |
+| `main.py` | Device firmware entry point copied to the board. |
+| `secrets.example.py` | Template for local device credentials and identifiers. |
+| `README.md` | Device behavior and deployment notes. |
+
+Keep real `secrets.py` files out of git. Run `make lint` after firmware edits so syntax is checked without importing MicroPython-only modules.
 
 ## Adding Management UI Code
 

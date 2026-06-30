@@ -1,6 +1,6 @@
 # Agent Guide
 
-TrueNAS-hosted environment sensor stack with Python collectors, an nginx event UI, and Komodo-managed Docker Compose deployment.
+TrueNAS-hosted environment sensor stack with MicroPython firmware, Python collectors, an nginx event UI, and Komodo-managed Docker Compose deployment.
 
 ## Read first
 
@@ -20,6 +20,7 @@ TrueNAS-hosted environment sensor stack with Python collectors, an nginx event U
 - Follow `../ahara/TRUENAS-DEPLOY.md` for TrueNAS, Komodo, Compose, GHCR, and SSM secret handling.
 - Use the `main` branch for this repo's commits and pushes unless the user explicitly directs otherwise.
 - Keep real secrets out of the repo. Add committed placeholders to `.env.example` and SSM paths to `secret-paths.yml`.
+- Keep firmware device credentials in ignored `firmware/**/secrets.py` files and commit only `secrets.example.py` templates.
 - Use `/opt/sulion/bin/with-cred -- ...` for commands that require API keys, cloud credentials, service tokens, or other broker-backed secrets.
 - Run `make ci` before committing changes.
 - Build deployed services as self-contained images. Keep runtime bind mounts out of `compose.yaml` unless the service intentionally needs host data.
@@ -33,6 +34,7 @@ TrueNAS-hosted environment sensor stack with Python collectors, an nginx event U
 | `compose.yaml` | Komodo-deployed TrueNAS stack definition. |
 | `secret-paths.yml` | SSM parameter paths for Komodo stack environment variables. |
 | `.env.example` | Safe local placeholders for Compose validation. |
+| `firmware/atoms3u-env3/` | MicroPython firmware for M5 AtomS3U ENV-III sensor devices. |
 | `collectors/environment-sensors/` | Python environment sensor collector and image packaging. |
 | `collectors/volt/` | Python Kasa voltage collector and image packaging. |
 | `management/volt-event/` | Nginx event logger UI and image packaging. |
@@ -44,7 +46,7 @@ TrueNAS-hosted environment sensor stack with Python collectors, an nginx event U
 | Command | Purpose |
 | ---- | ---- |
 | `make dev-install` | Install local test and lint dependencies. |
-| `make lint` | Validate Compose, run Ruff, and shell-check the nginx entrypoint syntax. |
+| `make lint` | Validate Compose, run Ruff, check firmware syntax, and shell-check the nginx entrypoint syntax. |
 | `make test` | Run pytest. |
 | `make ci` | Run lint, tests, and local image builds. |
 | `docker compose --env-file .env.example -f compose.yaml config` | Validate rendered Compose configuration. |

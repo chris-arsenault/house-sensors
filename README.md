@@ -1,6 +1,6 @@
 # House Sensors
 
-TrueNAS-hosted environment sensor stack for collecting temperature, humidity, voltage, and house event data into InfluxDB.
+TrueNAS-hosted environment sensor stack and device firmware for collecting temperature, humidity, voltage, and house event data into InfluxDB.
 
 ## Quickstart
 
@@ -9,12 +9,13 @@ make dev-install
 make ci
 ```
 
-`make ci` validates the Compose stack, runs Python lint and tests, and builds the collector and management UI images.
+`make ci` validates the Compose stack, checks firmware syntax, runs Python lint and tests, and builds the collector and management UI images.
 
 ## Components
 
 | Component | Purpose |
 | ---- | ---- |
+| `firmware/atoms3u-env3` | MicroPython firmware for M5 AtomS3U ENV-III sensor devices. |
 | `environment-sensors` | Discovers HTTP environment sensors and writes temperature, humidity, and pressure readings to InfluxDB. |
 | `volt` | Discovers Kasa energy-monitoring plugs and writes voltage, current, power, and total energy readings to InfluxDB. |
 | `volt-event` | Nginx-hosted house event logger UI that proxies event writes to InfluxDB. |

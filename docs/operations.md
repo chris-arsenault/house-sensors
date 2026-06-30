@@ -16,6 +16,22 @@ Committed secret references live in [secret-paths.yml](../secret-paths.yml). Kom
 
 Use `.env.example` only for local Compose validation. Keep real tokens, passwords, and usernames in SSM.
 
+The stack currently uses `/ahara/observability/influxdb-admin-token` for InfluxDB writes. The Grafana, OTLP, and InfluxDB admin password observability parameters are not bound because no house-sensors service reads them.
+
+Firmware credentials live in device-local `secrets.py` files copied to the board. Keep those files out of git and use `firmware/atoms3u-env3/secrets.example.py` as the template.
+
+## Firmware Devices
+
+AtomS3U ENV-III devices run `firmware/atoms3u-env3/main.py`. Each device exposes:
+
+| Endpoint | Purpose |
+| ---- | ---- |
+| `/` | Device status and tags. |
+| `/sensors` | Current sensor reading payload consumed by the collector. |
+| `/config` | Tag updates and deletes. |
+
+The UDP discovery response includes device ID, model, current IP, API port, supported endpoints, timestamps, and tags.
+
 ## InfluxDB
 
 The collectors and event UI write to InfluxDB buckets:
