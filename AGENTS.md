@@ -34,12 +34,13 @@ TrueNAS-hosted environment sensor stack with MicroPython firmware, Python collec
 | `compose.yaml` | Komodo-deployed TrueNAS stack definition. |
 | `platform.yml` | Ahara CI/CD manifest for the Komodo deploy path. |
 | `.github/workflows/ci.yml` | Local repo checks plus the shared Ahara CI/CD workflow. |
+| `infrastructure/terraform/` | Terraform-managed raw archive S3 bucket and TrueNAS Roles Anywhere workload role. |
 | `secret-paths.yml` | SSM parameter paths for Komodo stack environment variables. |
 | `.env.example` | Safe local placeholders for Compose validation. |
 | `firmware/atoms3u-env3/` | MicroPython firmware for M5 AtomS3U ENV-III sensor devices. |
 | `collectors/environment-sensors/` | Python environment sensor collector and image packaging. |
 | `collectors/volt/` | Python Kasa voltage collector and image packaging. |
-| `jobs/downsampling/` | Lightweight raw-to-medium and medium-to-long downsampling services and image packaging. |
+| `jobs/downsampling/` | Lightweight raw-to-medium, medium-to-long, and archive/retention services and image packaging. |
 | `management/volt-event/` | Nginx event logger UI and image packaging. |
 | `tests/` | Unit tests for collector parsing, config, and conversion behavior. |
 | `docs/` | Current-state architecture, development, operations, ADRs, and backlog. |

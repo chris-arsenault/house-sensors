@@ -1,6 +1,6 @@
-.PHONY: ci compose-config firmware-check lint test docker-build-images dev-install
+.PHONY: ci compose-config dashboards firmware-check lint test docker-build-images terraform-fmt-check dev-install
 
-ci: lint test docker-build-images
+ci: lint dashboards test docker-build-images
 
 dev-install:
 	python3 -m pip install -r requirements-dev.txt
@@ -10,8 +10,15 @@ compose-config:
 
 lint: compose-config
 	python3 -m ruff check collectors jobs tests
+	$(MAKE) terraform-fmt-check
 	$(MAKE) firmware-check
 	sh -n management/volt-event/docker-entrypoint.sh
+
+terraform-fmt-check:
+	terraform fmt -check -recursive infrastructure/terraform
+
+dashboards:
+	find observability/dashboards -name '*.json' -print0 | xargs -0 -r -n1 jq empty
 
 firmware-check:
 	python3 -c "from pathlib import Path; path = Path('firmware/atoms3u-env3/main.py'); compile(path.read_text(), str(path), 'exec')"

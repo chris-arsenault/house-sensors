@@ -20,6 +20,7 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install -r requirements.txt
 
 # Copy application code
+COPY app_telemetry.py ./
 COPY voltage_collector.py ./
 COPY config.yaml ./
 

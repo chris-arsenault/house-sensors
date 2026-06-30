@@ -20,6 +20,7 @@ This command runs:
 | ---- | ---- |
 | Compose validation | `docker compose --env-file .env.example -f compose.yaml config` |
 | Python lint | `python3 -m ruff check collectors jobs tests` |
+| Terraform format | `terraform fmt -check -recursive infrastructure/terraform` |
 | Firmware syntax | `python3 -c "compile(...)"` |
 | Shell syntax | `sh -n management/volt-event/docker-entrypoint.sh` |
 | Tests | `python3 -m pytest` |
@@ -29,7 +30,7 @@ This command runs:
 
 The caller workflow in `.github/workflows/ci.yml` runs the repo's local gate first, then calls `chris-arsenault/ahara/.github/workflows/ci.yml@main`.
 
-`platform.yml` declares `stack: [vendor]` because the repository has several component image contexts instead of the shared workflow's single Python backend layout. The shared workflow still validates Compose, builds and pushes the images listed in `platform.yml`, resolves `secret-paths.yml`, and deploys through Komodo on `main`.
+`platform.yml` declares `stack: [vendor, terraform]` because the repository has several component image contexts plus Terraform-managed raw archive storage. The shared workflow validates Compose, builds and pushes the images listed in `platform.yml`, applies Terraform on `main`, resolves `secret-paths.yml`, and deploys through Komodo.
 
 The deployed service is VPN-only. Do not add an Ahara reverse-proxy route unless the deployment model changes intentionally.
 
@@ -50,7 +51,7 @@ Add unit tests for parsing, conversion, and config behavior under `tests/`. Keep
 
 Keep scheduled or looping jobs under `jobs/<name>/`. Job directories follow the same component image pattern as collectors: `Dockerfile`, `requirements.txt`, source, and focused unit tests for business logic.
 
-Downsampling jobs are intentionally direct Python processes. Runtime state belongs in their mounted state volumes, and operator visibility comes from container logs plus the JSON state files.
+Downsampling and retention jobs are intentionally direct Python processes. Runtime state belongs in their mounted state volumes, and operator visibility comes from container logs plus the JSON state files.
 
 ## Adding Firmware Code
 

@@ -1,6 +1,7 @@
 .sulion-paste/
 .pytest_cache/
 .ruff_cache/
+**/.terraform/
 __pycache__/
 *.py[cod]
 firmware/**/secrets.py

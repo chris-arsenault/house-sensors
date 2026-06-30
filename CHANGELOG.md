@@ -7,6 +7,8 @@ All notable user-visible changes are recorded here.
 ### Stack
 
 - Added `downsampling-medium` and `downsampling-long` services for raw-to-medium and medium-to-long sensor rollups with persisted threshold state.
+- Added Terraform-managed S3 raw backups plus `raw-archive-cleanup` for 30-day raw, six-month medium, and indefinite long retention, with S3 access through TrueNAS IAM Roles Anywhere.
+- Temporarily disabled InfluxDB retention deletes while validating raw S3 archives.
 - Added Ahara CI/CD wiring for local validation, GHCR image publishing, and Komodo deployment from `main`.
 - Updated the deployed UI port binding to the VPN-only TrueNAS LAN address.
 - Bound all InfluxDB writer tokens to the shared observability SSM parameter `/ahara/observability/influxdb-admin-token`.

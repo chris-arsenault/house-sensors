@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import datetime as dt
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 from conftest import load_module
@@ -11,6 +14,10 @@ downsampling = load_module(
 raw_downsampling = load_module(
     "raw_to_medium_test",
     "jobs/downsampling/raw_to_medium.py",
+)
+raw_archive = load_module(
+    "raw_archive_cleanup_test",
+    "jobs/downsampling/raw_archive_cleanup.py",
 )
 
 
@@ -52,6 +59,31 @@ def _raw_config(tmp_path):
     )
 
 
+def _archive_config(tmp_path):
+    return raw_archive.Config(
+        influx_url="http://influx.example",
+        influx_token="token",
+        influx_org="ahara",
+        raw_buckets=["environment-data", "voltage-data"],
+        medium_bucket="sensors-medium",
+        medium_measurement="sensors",
+        state_file=tmp_path / "raw-archive-state.json",
+        medium_state_file=tmp_path / "raw-to-medium-state.json",
+        long_state_file=tmp_path / "medium-to-long-state.json",
+        s3_bucket="house-sensors-raw-test",
+        s3_prefix="house-sensors/raw",
+        aws_region="us-east-1",
+        create_s3_bucket=False,
+        raw_retention_days=30,
+        medium_retention_months=6,
+        chunk_hours=24,
+        interval_seconds=3600,
+        archive_start_iso=None,
+        dry_run=True,
+        delete_enabled=True,
+    )
+
+
 def _install_fake_point(monkeypatch):
     created = []
 
@@ -77,6 +109,19 @@ def _install_fake_point(monkeypatch):
 
     monkeypatch.setattr(raw_downsampling, "Point", FakePoint)
     return created
+
+
+class _FakeRecord:
+    def __init__(self, *, values, value, timestamp):
+        self.values = values
+        self._value = value
+        self._timestamp = timestamp
+
+    def get_value(self):
+        return self._value
+
+    def get_time(self):
+        return self._timestamp
 
 
 def test_oscillation_count_ignores_flat_steps():
@@ -224,3 +269,72 @@ def test_build_medium_points_aggregates_env_and_preserves_voltage_anomalies(tmp_
     assert {point.tags["domain"] for point in power_points} == {"power"}
     assert {point.tags["sensor_id"] for point in power_points} == {"CHRIS_OFFICE_SMART_PLUG"}
     assert len(points) == 10
+
+
+def test_raw_archive_line_protocol_preserves_measurement_tags_field_and_time():
+    timestamp = dt.datetime(2026, 6, 30, 0, 0, tzinfo=dt.UTC)
+    record = _FakeRecord(
+        values={
+            "result": "_result",
+            "table": 0,
+            "_measurement": "voltage_monitoring",
+            "_field": "voltage",
+            "device_name": "Office Plug",
+            "location": "chris office",
+        },
+        value=120.5,
+        timestamp=timestamp,
+    )
+
+    line = raw_archive.record_to_line_protocol(record)
+
+    assert line == "voltage_monitoring,device_name=Office\\ Plug,location=chris\\ office voltage=120.5 1782777600000000000"
+
+
+def test_raw_archive_retention_windows_wait_for_downsampling_watermarks(tmp_path):
+    config = _archive_config(tmp_path)
+    now = dt.datetime(2026, 6, 30, 12, 30, tzinfo=dt.UTC)
+    medium = raw_archive.Coverage(
+        start=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        stop=dt.datetime(2026, 6, 20, tzinfo=dt.UTC),
+    )
+    long = raw_archive.Coverage(
+        start=dt.datetime(2026, 2, 1, tzinfo=dt.UTC),
+        stop=dt.datetime(2026, 6, 15, tzinfo=dt.UTC),
+    )
+
+    assert raw_archive.raw_export_stop(config, now, medium, long) == dt.datetime(2026, 5, 31, 12, 0, tzinfo=dt.UTC)
+    assert raw_archive.medium_cleanup_stop(config, now, long) == dt.datetime(2025, 12, 30, 12, 0, tzinfo=dt.UTC)
+    assert raw_archive.coverage_gated_start(dt.datetime(1970, 1, 1, tzinfo=dt.UTC), medium, long) == dt.datetime(2026, 2, 1, tzinfo=dt.UTC)
+    assert raw_archive.raw_export_stop(config, now, raw_archive.Coverage(start=None, stop=None), long) is None
+    assert raw_archive.coverage_gated_start(dt.datetime(1970, 1, 1, tzinfo=dt.UTC), raw_archive.Coverage(start=None, stop=now)) is None
+
+
+def test_raw_archive_delete_disabled_does_not_advance_delete_watermarks(tmp_path, monkeypatch):
+    config = replace(_archive_config(tmp_path), delete_enabled=False)
+    state = {
+        "raw_exports": {
+            "environment-data": {"last_stop_iso": "2026-05-31T00:00:00Z"},
+        },
+        "raw_deletes": {},
+        "medium_delete": {},
+    }
+    medium = raw_archive.Coverage(
+        start=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        stop=dt.datetime(2026, 6, 1, tzinfo=dt.UTC),
+    )
+    long = raw_archive.Coverage(
+        start=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        stop=dt.datetime(2026, 6, 1, tzinfo=dt.UTC),
+    )
+
+    monkeypatch.setattr(
+        raw_archive,
+        "_influx_api",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("delete API should not be called")),
+    )
+
+    assert raw_archive.cleanup_raw(config, state, medium, long) == 0
+    assert raw_archive.cleanup_medium(config, state, long, dt.datetime(2026, 5, 31, tzinfo=dt.UTC)) == 0
+    assert state["raw_deletes"] == {}
+    assert state["medium_delete"] == {}

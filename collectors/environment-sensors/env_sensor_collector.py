@@ -21,6 +21,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 import requests
+from app_telemetry import telemetry_from_env
 from requests.auth import HTTPBasicAuth
 
 # -----------------------------
@@ -60,6 +61,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(threadName)s %(message)s",
 )
 logger = logging.getLogger("iot-poller")
+telemetry = telemetry_from_env("house-sensors.environment-sensors")
 
 shutdown_event = threading.Event()
 devices_lock = threading.Lock()
@@ -113,8 +115,10 @@ def safe_get(d: Dict, *keys, default=None):
 
 
 def influx_write(session: requests.Session, lines: str) -> bool:
+    line_count = len([line for line in lines.splitlines() if line.strip()])
     if not (INFLUX_URL and INFLUX_TOKEN and INFLUX_ORG and INFLUX_BUCKET):
         logger.error("InfluxDB env not fully configured (INFLUX_URL/TOKEN/ORG/BUCKET). Skipping write.")
+        telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "system", "outcome": "misconfigured"})
         return False
 
     url = f"{INFLUX_URL.rstrip('/')}/api/v2/write"
@@ -124,10 +128,14 @@ def influx_write(session: requests.Session, lines: str) -> bool:
         r = session.post(url, params=params, headers=headers, data=lines.encode("utf-8"), timeout=5)
         if r.status_code not in (204, 200):
             logger.warning("Influx write failed: %s %s", r.status_code, r.text[:300])
+            telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "polling", "outcome": "error"})
             return False
+        telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "polling", "outcome": "success"})
+        telemetry.record("house_sensors.influx_write_lines", line_count, {"operation.type": "polling"})
         return True
     except Exception as e:
         logger.warning("Influx write exception: %s", e)
+        telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "polling", "outcome": "error"})
         return False
 
 # -----------------------------
@@ -146,6 +154,7 @@ def build_device_from_reply(addr: Tuple[str, int], payload: bytes) -> Optional[D
 
 
 def run_discovery() -> Dict[str, Dict]:
+    started_at = time.monotonic()
     logger.info("Starting discovery: UDP -> %s:%d (timeout=%.1fs)", DISCOVERY_ADDRESS, DISCOVERY_PORT, DISCOVERY_TIMEOUT_SECONDS)
     discovered: Dict[str, Dict] = {}
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -179,6 +188,9 @@ def run_discovery() -> Dict[str, Dict]:
         logger.warning("Discovery completed: no devices found.")
     else:
         logger.info("Discovery completed: %d device(s) found.", len(discovered))
+    telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "success"})
+    telemetry.record("house_sensors.discovery_duration_ms", (time.monotonic() - started_at) * 1000, {"operation.type": "background"})
+    telemetry.record("house_sensors.discovered_devices", len(discovered), {"operation.type": "background"})
     return discovered
 
 # -----------------------------
@@ -213,6 +225,7 @@ def validate_device(session: requests.Session, d: Dict) -> bool:
         r = session.get(url, timeout=3)
         if r.status_code != 200:
             print(f"non 200 response {r.status_code}, {r}")
+            telemetry.count("house_sensors.device_validation", attributes={"operation.type": "background", "outcome": "error"})
             return False
         print(r)
         js = r.json()
@@ -228,9 +241,11 @@ def validate_device(session: requests.Session, d: Dict) -> bool:
                 "temperature", "pressure", "humidity",
                 "temperature_c", "temperature_f", "pressure_pa", "pressure_hpa"
             ))
+        telemetry.count("house_sensors.device_validation", attributes={"operation.type": "background", "outcome": "success" if ok else "invalid"})
         return ok
     except Exception as e:
         print(f"exception in validate {e}")
+        telemetry.count("house_sensors.device_validation", attributes={"operation.type": "background", "outcome": "error"})
         return False
 
 
@@ -399,18 +414,22 @@ def polling_thread():
                     lp = build_line_protocol(d, payload, corrected_ts_ns)
                     if lp:
                         lines.append(lp)
+                        telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "success"})
                         logger.info("Reading %s: %s", ip, {k: payload.get(k) for k in (
                             "temperature_c","temperature_f","humidity","pressure_pa","pressure_hpa",
                             "device","model","device_id","timestamp_ms","timestamp_iso","sample_age_ms","tags"
                         )})
                     else:
                         logger.debug("No expected fields in %s payload: %s", ip, payload)
+                        telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "empty"})
                 except Exception as e:
                     logger.warning("Polling error for %s: %s", ip, e)
+                    telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "error"})
 
             if lines:
                 batch = "\n".join(lines)
                 influx_write(write_sess, batch)
+            telemetry.record("house_sensors.poll_batch_lines", len(lines), {"operation.type": "polling"})
 
         shutdown_event.wait(0.05)
 

@@ -1,3 +1,10 @@
+x-house-sensors-otel: &house-sensors-otel
+  DEPLOYMENT_ENVIRONMENT: "truenas"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://192.168.66.3:4318"
+  OTEL_METRIC_EXPORT_INTERVAL: "30000"
+  OTEL_METRICS_EXPORTER: "otlp"
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=house-sensors,deployment.environment=truenas,project=house-sensors"
+
 services:
   environment-sensors:
     image: ghcr.io/chris-arsenault/house-sensors/collectors/environment-sensors:${IMAGE_TAG:-latest}
@@ -8,6 +15,8 @@ services:
       - no-new-privileges:true
     network_mode: host
     environment:
+      <<: *house-sensors-otel
+      OTEL_SERVICE_NAME: "house-sensors.environment-sensors"
       INFLUX_URL: "http://192.168.66.3:30115"
       INFLUX_ORG: "ahara"
       INFLUX_BUCKET: "environment-data"
@@ -25,6 +34,8 @@ services:
       - no-new-privileges:true
     network_mode: host
     environment:
+      <<: *house-sensors-otel
+      OTEL_SERVICE_NAME: "house-sensors.volt"
       INFLUXDB_URL: "http://192.168.66.3:30115"
       INFLUXDB_TOKEN: "${VOLT_INFLUXDB_TOKEN}"
       INFLUXDB_ORG: "ahara"
@@ -57,6 +68,8 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      <<: *house-sensors-otel
+      OTEL_SERVICE_NAME: "house-sensors.downsampling-medium"
       INFLUX_URL: "http://192.168.66.3:30115"
       INFLUX_ORG: "ahara"
       INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
@@ -65,7 +78,7 @@ services:
       DOWNSAMPLE_MEDIUM_BUCKET: "sensors-medium"
       DOWNSAMPLE_MEDIUM_MEASUREMENT: "sensors"
       DOWNSAMPLE_MEDIUM_STATE_FILE: "/state/raw_to_medium_state.json"
-      DOWNSAMPLE_MEDIUM_DAYS_BACK: "60"
+      DOWNSAMPLE_MEDIUM_DAYS_BACK: "365"
       DOWNSAMPLE_MEDIUM_CHUNK_MINUTES: "60"
       DOWNSAMPLE_MEDIUM_INTERVAL_SECONDS: "60"
       DOWNSAMPLE_MEDIUM_DELAY_SECONDS: "60"
@@ -92,6 +105,8 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      <<: *house-sensors-otel
+      OTEL_SERVICE_NAME: "house-sensors.downsampling-long"
       INFLUX_URL: "http://192.168.66.3:30115"
       INFLUX_ORG: "ahara"
       INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
@@ -99,7 +114,7 @@ services:
       DOWNSAMPLE_DST_BUCKET: "sensors-long"
       DOWNSAMPLE_MEASUREMENT: "sensors"
       DOWNSAMPLE_STATE_FILE: "/state/medium_to_long_state.json"
-      DOWNSAMPLE_DAYS_BACK: "60"
+      DOWNSAMPLE_DAYS_BACK: "365"
       DOWNSAMPLE_CHUNK_MINUTES: "360"
       DOWNSAMPLE_INTERVAL_SECONDS: "3600"
       DOWNSAMPLE_DELAY_MINUTES: "10"
@@ -114,6 +129,59 @@ services:
     volumes:
       - downsampling-long-state:/state
 
+  raw-archive-cleanup:
+    image: ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG:-latest}
+    command:
+      - /usr/local/bin/truenas-roles-anywhere-bootstrap
+      - AWS_RA_RAW_ARCHIVE
+      - --
+      - python
+      - -u
+      - raw_archive_cleanup.py
+      - run-loop
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      <<: *house-sensors-otel
+      OTEL_SERVICE_NAME: "house-sensors.raw-archive-cleanup"
+      INFLUX_URL: "http://192.168.66.3:30115"
+      INFLUX_ORG: "ahara"
+      INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
+      AWS_REGION: "us-east-1"
+      AWS_DEFAULT_REGION: "us-east-1"
+      AWS_SDK_LOAD_CONFIG: "1"
+      AWS_RA_RAW_ARCHIVE_WORKLOAD_ID: "${AWS_RA_RAW_ARCHIVE_WORKLOAD_ID}"
+      AWS_RA_RAW_ARCHIVE_ENROLLMENT_TOKEN: "${AWS_RA_RAW_ARCHIVE_ENROLLMENT_TOKEN}"
+      AWS_RA_RAW_ARCHIVE_ENROLLMENT_URL: "${AWS_RA_RAW_ARCHIVE_ENROLLMENT_URL}"
+      AWS_RA_RAW_ARCHIVE_TRUST_ANCHOR_ARN: "${AWS_RA_RAW_ARCHIVE_TRUST_ANCHOR_ARN}"
+      AWS_RA_RAW_ARCHIVE_PROFILE_ARN: "${AWS_RA_RAW_ARCHIVE_PROFILE_ARN}"
+      AWS_RA_RAW_ARCHIVE_ENTRY_ROLE_ARN: "${AWS_RA_RAW_ARCHIVE_ENTRY_ROLE_ARN}"
+      AWS_RA_RAW_ARCHIVE_ROLE_ARN: "${AWS_RA_RAW_ARCHIVE_ROLE_ARN}"
+      RAW_ARCHIVE_S3_BUCKET: "${RAW_ARCHIVE_S3_BUCKET}"
+      RAW_ARCHIVE_S3_PREFIX: "house-sensors/raw"
+      RAW_ARCHIVE_RAW_BUCKETS: "environment-data,voltage-data"
+      RAW_ARCHIVE_MEDIUM_BUCKET: "sensors-medium"
+      RAW_ARCHIVE_MEDIUM_MEASUREMENT: "sensors"
+      RAW_ARCHIVE_STATE_FILE: "/state/raw_archive_cleanup_state.json"
+      RAW_ARCHIVE_MEDIUM_STATE_FILE: "/downsampling-medium-state/raw_to_medium_state.json"
+      RAW_ARCHIVE_LONG_STATE_FILE: "/downsampling-long-state/medium_to_long_state.json"
+      RAW_ARCHIVE_RAW_RETENTION_DAYS: "30"
+      RAW_ARCHIVE_MEDIUM_RETENTION_MONTHS: "6"
+      RAW_ARCHIVE_CHUNK_HOURS: "24"
+      RAW_ARCHIVE_INTERVAL_SECONDS: "3600"
+      RAW_ARCHIVE_CREATE_S3_BUCKET: "false"
+      RAW_ARCHIVE_DELETE_ENABLED: "false"
+    volumes:
+      - raw-archive-state:/state
+      - raw-archive-aws-identity:/var/lib/ahara/aws-identity
+      - downsampling-medium-state:/downsampling-medium-state:ro
+      - downsampling-long-state:/downsampling-long-state:ro
+
 volumes:
   downsampling-medium-state:
   downsampling-long-state:
+  raw-archive-state:
+  raw-archive-aws-identity:

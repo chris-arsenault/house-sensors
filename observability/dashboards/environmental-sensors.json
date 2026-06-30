@@ -1,0 +1,188 @@
+{
+  "id": null,
+  "uid": "ahara-environmental-sensors",
+  "title": "Ahara Environmental Sensors",
+  "tags": ["ahara", "sensors", "influxdb"],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "bucket",
+        "label": "Bucket",
+        "type": "custom",
+        "query": "env_sensors",
+        "current": {
+          "selected": true,
+          "text": "env_sensors",
+          "value": "env_sensors"
+        }
+      },
+      {
+        "name": "measurement",
+        "label": "Measurement",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "influxdb-sensors"
+        },
+        "query": "import \"influxdata/influxdb/schema\"\nschema.measurements(bucket: \"${bucket}\")",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "field",
+        "label": "Field",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "influxdb-sensors"
+        },
+        "query": "import \"influxdata/influxdb/schema\"\nschema.fieldKeys(bucket: \"${bucket}\")",
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Latest Sensor Values",
+      "type": "table",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-sensors"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement =~ /^${measurement:regex}$/)\n  |> filter(fn: (r) => r._field =~ /^${field:regex}$/)\n  |> group(columns: [\"_measurement\", \"_field\"])\n  |> last()\n  |> keep(columns: [\"_time\", \"_measurement\", \"_field\", \"_value\", \"host\", \"device\", \"sensor\", \"room\", \"location\"])",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-sensors"
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Sensor Trends",
+      "type": "timeseries",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-sensors"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement =~ /^${measurement:regex}$/)\n  |> filter(fn: (r) => r._field =~ /^${field:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> yield(name: \"mean\")",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-sensors"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Points by Measurement",
+      "type": "table",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-sensors"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> group(columns: [\"_measurement\"])\n  |> count(column: \"_value\")\n  |> keep(columns: [\"_measurement\", \"_value\"])\n  |> sort(columns: [\"_value\"], desc: true)",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-sensors"
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Recent Sensor Points",
+      "type": "table",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-sensors"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement =~ /^${measurement:regex}$/)\n  |> filter(fn: (r) => r._field =~ /^${field:regex}$/)\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 100)\n  |> keep(columns: [\"_time\", \"_measurement\", \"_field\", \"_value\", \"host\", \"device\", \"sensor\", \"room\", \"location\"])",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-sensors"
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    }
+  ]
+}

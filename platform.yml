@@ -2,12 +2,22 @@ project: house-sensors
 prefix: house-sensors
 stack:
   - vendor
+  - terraform
 truenas: true
 truenas_compose_path: compose.yaml
 truenas_compose_check_paths:
   - compose.yaml
+truenas_roles_anywhere:
+  raw-archive:
+    env_prefix: AWS_RA_RAW_ARCHIVE
 images:
   - collectors/environment-sensors
   - collectors/volt
   - management/volt-event
   - jobs/downsampling
+observability:
+  dashboards:
+    path: observability/dashboards
+    folder_uid: house-sensors
+    folder_title: House Sensors
+    prune: true

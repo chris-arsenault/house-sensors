@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Bootstrap a TrueNAS workload for AWS IAM Roles Anywhere.
+#
+# Usage:
+#   truenas-roles-anywhere-bootstrap AWS_RA_BACKUP -- my-service
+#
+# The script generates the private key locally, stores it on a persistent
+# volume, enrolls a certificate with the platform enrollment endpoint, writes an
+# AWS config file, and then execs the requested command with AWS_PROFILE set.
+set -euo pipefail
+
+ENV_PREFIX="${1:-AWS_RA}"
+if [ $# -gt 0 ]; then
+  shift
+fi
+if [ "${1:-}" = "--" ]; then
+  shift
+fi
+
+if [[ ! "${ENV_PREFIX}" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+  echo "Invalid env prefix ${ENV_PREFIX}" >&2
+  exit 1
+fi
+
+get_env() {
+  local name="${ENV_PREFIX}_$1"
+  local value="${!name:-}"
+  if [ -z "${value}" ]; then
+    echo "Missing required env var ${name}" >&2
+    exit 1
+  fi
+  printf '%s' "${value}"
+}
+
+WORKLOAD_ID="$(get_env WORKLOAD_ID)"
+if [[ ! "${WORKLOAD_ID}" =~ ^spiffe://ahara/truenas/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$ ]]; then
+  echo "Invalid workload id ${WORKLOAD_ID}" >&2
+  exit 1
+fi
+ENROLLMENT_URL="$(get_env ENROLLMENT_URL)"
+TRUST_ANCHOR_ARN="$(get_env TRUST_ANCHOR_ARN)"
+PROFILE_ARN="$(get_env PROFILE_ARN)"
+ENTRY_ROLE_ARN="$(get_env ENTRY_ROLE_ARN)"
+ROLE_ARN="$(get_env ROLE_ARN)"
+ENROLLMENT_TOKEN="${ENV_PREFIX}_ENROLLMENT_TOKEN"
+ENROLLMENT_TOKEN="${!ENROLLMENT_TOKEN:-}"
+
+SAFE_NAME="$(printf '%s' "${WORKLOAD_ID}" | sed 's#[^A-Za-z0-9_.-]#_#g')"
+SESSION_NAME="truenas-$(printf '%s' "${WORKLOAD_ID}" | sha256sum | awk '{print substr($1, 1, 16)}')"
+CERT_DIR_VAR="${ENV_PREFIX}_CERT_DIR"
+CERT_DIR="${!CERT_DIR_VAR:-/var/lib/ahara/aws-identity/${SAFE_NAME}}"
+PROFILE_NAME_VAR="${ENV_PREFIX}_AWS_PROFILE"
+PROFILE_NAME="${!PROFILE_NAME_VAR:-truenas-workload}"
+
+KEY_FILE="${CERT_DIR}/private-key.pem"
+CSR_FILE="${CERT_DIR}/request.csr"
+CERT_FILE="${CERT_DIR}/certificate.pem"
+CHAIN_FILE="${CERT_DIR}/certificate-chain.pem"
+AWS_CONFIG_FILE_PATH="${CERT_DIR}/aws-config"
+
+mkdir -p "${CERT_DIR}"
+chmod 700 "${CERT_DIR}"
+
+if [ ! -f "${KEY_FILE}" ]; then
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "${KEY_FILE}"
+  chmod 600 "${KEY_FILE}"
+fi
+
+needs_enrollment=false
+if [ ! -f "${CERT_FILE}" ]; then
+  needs_enrollment=true
+elif ! openssl x509 -checkend 604800 -noout -in "${CERT_FILE}" >/dev/null 2>&1; then
+  needs_enrollment=true
+fi
+
+if [ "${needs_enrollment}" = "true" ]; then
+  if [ -z "${ENROLLMENT_TOKEN}" ]; then
+    echo "Certificate is missing or expiring, but ${ENV_PREFIX}_ENROLLMENT_TOKEN is empty" >&2
+    exit 1
+  fi
+
+  CSR_CONFIG="$(mktemp)"
+  PAYLOAD_FILE="$(mktemp)"
+  RESPONSE_FILE="$(mktemp)"
+  trap 'rm -f "${CSR_CONFIG}" "${PAYLOAD_FILE}" "${RESPONSE_FILE}"' EXIT
+
+  cat > "${CSR_CONFIG}" <<EOF
+[req]
+prompt = no
+distinguished_name = dn
+req_extensions = v3_req
+
+[dn]
+CN = truenas-workload
+
+[v3_req]
+subjectAltName = URI:${WORKLOAD_ID}
+EOF
+
+  openssl req -new -key "${KEY_FILE}" -out "${CSR_FILE}" -config "${CSR_CONFIG}"
+
+  python3 - "${WORKLOAD_ID}" "${ENROLLMENT_TOKEN}" "${CSR_FILE}" > "${PAYLOAD_FILE}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+workload_id, token, csr_path = sys.argv[1:]
+print(json.dumps({
+    "workload_id": workload_id,
+    "token": token,
+    "csr_pem": Path(csr_path).read_text(),
+}))
+PY
+
+  curl -fsS \
+    -X POST \
+    -H "content-type: application/json" \
+    --data-binary @"${PAYLOAD_FILE}" \
+    "${ENROLLMENT_URL}" > "${RESPONSE_FILE}"
+
+  python3 - "${RESPONSE_FILE}" "${CERT_FILE}" "${CHAIN_FILE}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+response_path, cert_path, chain_path = sys.argv[1:]
+data = json.loads(Path(response_path).read_text())
+if "error" in data:
+    raise SystemExit(data["error"])
+Path(cert_path).write_text(data["certificate_pem"])
+Path(chain_path).write_text(data["certificate_chain_pem"])
+PY
+fi
+
+cat > "${AWS_CONFIG_FILE_PATH}" <<EOF
+[profile ${PROFILE_NAME}-entry]
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate ${CERT_FILE} --private-key ${KEY_FILE} --trust-anchor-arn ${TRUST_ANCHOR_ARN} --profile-arn ${PROFILE_ARN} --role-arn ${ENTRY_ROLE_ARN}
+
+[profile ${PROFILE_NAME}]
+source_profile = ${PROFILE_NAME}-entry
+role_arn = ${ROLE_ARN}
+role_session_name = ${SESSION_NAME}
+EOF
+
+export AWS_CONFIG_FILE="${AWS_CONFIG_FILE_PATH}"
+export AWS_PROFILE="${PROFILE_NAME}"
+
+if [ $# -gt 0 ]; then
+  exec "$@"
+fi
+
+printf 'export AWS_CONFIG_FILE=%q\n' "${AWS_CONFIG_FILE}"
+printf 'export AWS_PROFILE=%q\n' "${AWS_PROFILE}"

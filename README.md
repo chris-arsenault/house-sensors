@@ -9,7 +9,7 @@ make dev-install
 make ci
 ```
 
-`make ci` validates the Compose stack, checks firmware syntax, runs Python lint and tests, and builds the collector and management UI images.
+`make ci` validates the Compose stack, Grafana dashboard JSON, firmware syntax, Python lint/tests, and collector/management UI image builds.
 
 ## Components
 
@@ -21,6 +21,7 @@ make ci
 | `volt-event` | Nginx-hosted house event logger UI that proxies event writes to InfluxDB. |
 | `downsampling-medium` | Raw-to-medium rollup job that reads environment and voltage buckets, emits per-minute aggregates, and preserves anomalous seconds. |
 | `downsampling-long` | Medium-to-long rollup job that emits hourly aggregates and preserves anomalous minute/second detail. |
+| `raw-archive-cleanup` | Archives raw InfluxDB data to S3, then enforces 30-day raw and 6-month medium retention after rollups are covered. |
 
 ## Documentation
 
@@ -36,7 +37,7 @@ make ci
 
 ## Deployment
 
-The deployable surface is [compose.yaml](compose.yaml). [platform.yml](platform.yml) and [.github/workflows/ci.yml](.github/workflows/ci.yml) use the shared Ahara TrueNAS workflow to build GHCR images, resolve [secret-paths.yml](secret-paths.yml), and deploy the Komodo stack from `main`.
+The deployable surface is [compose.yaml](compose.yaml), [infrastructure/terraform](infrastructure/terraform), and product-owned Grafana dashboards in [observability/dashboards](observability/dashboards). [platform.yml](platform.yml) and [.github/workflows/ci.yml](.github/workflows/ci.yml) use the shared Ahara workflow to apply Terraform, build GHCR images, resolve [secret-paths.yml](secret-paths.yml), deploy the Komodo stack, and publish dashboards to the shared Grafana instance from `main`.
 
 The stack is VPN-only like Harbor: `volt-event` binds to `192.168.66.3:8085`, and this repo does not register an Ahara reverse-proxy route.
 

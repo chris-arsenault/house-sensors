@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from app_telemetry import telemetry_from_env
 from dateutil.tz import tzutc
 
 try:
@@ -43,6 +44,7 @@ DEFAULT_STATE_FILE = "/state/medium_to_long_state.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("medium_to_long_downsampler")
+telemetry = telemetry_from_env("house-sensors.downsampling-long")
 
 
 @dataclass(frozen=True)
@@ -196,6 +198,8 @@ def load_state(config: Config) -> dict[str, Any]:
         return {
             "hour_thresholds": copy.deepcopy(config.initial_hour_thresholds),
             "last_stop_iso": None,
+            "coverage_start_iso": None,
+            "coverage_stop_iso": None,
         }
     try:
         raw = json.loads(config.state_file.read_text())
@@ -205,6 +209,8 @@ def load_state(config: Config) -> dict[str, Any]:
     return {
         "hour_thresholds": _normalize_hour_thresholds(raw.get("hour_thresholds") or {}, config.params),
         "last_stop_iso": raw.get("last_stop_iso"),
+        "coverage_start_iso": raw.get("coverage_start_iso"),
+        "coverage_stop_iso": raw.get("coverage_stop_iso"),
     }
 
 
@@ -213,6 +219,8 @@ def save_state(config: Config, state: dict[str, Any]) -> None:
     payload = {
         "hour_thresholds": _normalize_hour_thresholds(state.get("hour_thresholds") or {}, config.params),
         "last_stop_iso": state.get("last_stop_iso"),
+        "coverage_start_iso": state.get("coverage_start_iso"),
+        "coverage_stop_iso": state.get("coverage_stop_iso"),
         "updated_at": dt.datetime.now(tz=tzutc()).isoformat(),
     }
     tmp_path = config.state_file.with_suffix(config.state_file.suffix + ".tmp")
@@ -661,6 +669,12 @@ def run_once(config: Config) -> dict[str, Any]:
     chunk = dt.timedelta(minutes=config.chunk_minutes)
     totals = {"chunks": 0, "hours": 0, "series": 0, "anom_series": 0, "wrote": 0, "wrote_1s": 0}
     hour_thresholds = _normalize_hour_thresholds(state.get("hour_thresholds") or {}, config.params)
+    if not state.get("coverage_start_iso"):
+        state["coverage_start_iso"] = _iso(start)
+    else:
+        existing_start = _parse_time(state["coverage_start_iso"])
+        if start < existing_start:
+            state["coverage_start_iso"] = _iso(start)
 
     log.info(
         "medium-to-long downsample | window=[%s -> %s] | src=%s dst=%s | chunk=%sm | dry_run=%s",
@@ -690,6 +704,7 @@ def run_once(config: Config) -> dict[str, Any]:
             if not config.dry_run:
                 state["hour_thresholds"] = hour_thresholds
                 state["last_stop_iso"] = _iso(nxt)
+                state["coverage_stop_iso"] = _iso(nxt)
                 save_state(config, state)
 
             rate = stats["anom_series"] / max(1, stats["series"]) if stats["series"] else 0.0
@@ -720,6 +735,14 @@ def run_once(config: Config) -> dict[str, Any]:
         totals["wrote_1s"],
         elapsed,
     )
+    attrs = {"operation.type": "background", "job": "medium_to_long", "outcome": "success"}
+    telemetry.count("house_sensors.job_cycles", attributes=attrs)
+    telemetry.record("house_sensors.job_duration_ms", elapsed * 1000, attrs)
+    telemetry.record("house_sensors.job_chunks", totals["chunks"], attrs)
+    telemetry.record("house_sensors.job_series", totals["series"], attrs)
+    telemetry.record("house_sensors.job_anomalies", totals["anom_series"], attrs)
+    telemetry.record("house_sensors.job_points_written", totals["wrote"], attrs)
+    telemetry.record("house_sensors.job_second_points_written", totals["wrote_1s"], attrs)
     return {**totals, "elapsed_seconds": elapsed}
 
 
@@ -729,8 +752,10 @@ def run_loop(config: Config) -> None:
             run_once(config)
         except ValueError as exc:
             log.info("no downsample work this cycle: %s", exc)
+            telemetry.count("house_sensors.job_cycles", attributes={"operation.type": "background", "job": "medium_to_long", "outcome": "no_work"})
         except Exception as exc:
             log.error("downsample cycle failed: %s", exc)
+            telemetry.count("house_sensors.job_cycles", attributes={"operation.type": "background", "job": "medium_to_long", "outcome": "error"})
             traceback.print_exc()
         time.sleep(config.interval_seconds)
 

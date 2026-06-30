@@ -9,10 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from datetime import UTC, datetime
 from typing import Dict, Optional
 
 import yaml
+from app_telemetry import telemetry_from_env
 
 # InfluxDB imports
 try:
@@ -48,6 +50,7 @@ except ImportError as e:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+telemetry = telemetry_from_env("house-sensors.volt")
 
 
 class VoltageCollector:
@@ -137,9 +140,17 @@ class VoltageCollector:
                 # Test connection
                 self.influx_client.ping()
                 logger.info(f"InfluxDB client initialized and connected to {influx_url}")
+                telemetry.count(
+                    "house_sensors.backend_connections",
+                    attributes={"backend": "influxdb", "operation.type": "background", "outcome": "success"},
+                )
             except Exception as e:
                 logger.error(f"Failed to initialize InfluxDB client: {e}")
                 logger.error(f"InfluxDB config - URL: {influx_url}, Org: {influx_org}, Token set: {bool(influx_token)}")
+                telemetry.count(
+                    "house_sensors.backend_connections",
+                    attributes={"backend": "influxdb", "operation.type": "background", "outcome": "error"},
+                )
                 self.influx_client = None
         elif not INFLUX_AVAILABLE:
             logger.warning("InfluxDB client library not available - install influxdb-client")
@@ -154,8 +165,10 @@ class VoltageCollector:
 
     async def discover_devices(self):
         """Discover Kasa devices on the network using new API"""
+        started_at = time.monotonic()
         if not KASA_AVAILABLE:
             logger.error("Python-kasa not available, cannot discover devices")
+            telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "dependency_missing"})
             return
 
         # Get authentication credentials
@@ -174,6 +187,7 @@ class VoltageCollector:
                 return
         else:
             logger.info("No authentication credentials provided")
+            telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "missing_credentials"})
             return
 
         # Auto-discovery - use all found devices
@@ -181,6 +195,7 @@ class VoltageCollector:
         try:
             found_devices = await Discover.discover(timeout=10, credentials=credentials)
             logger.info(f"Auto-discovery found {len(found_devices)} authenticated devices")
+            telemetry.record("house_sensors.discovered_devices", len(found_devices), {"operation.type": "background"})
 
             for ip, device in found_devices.items():
                 if device:
@@ -208,6 +223,13 @@ class VoltageCollector:
         except Exception as e:
             logger.error(f"Auto-discovery with authentication failed: {e}")
             logger.info("Make sure your username/password are correct")
+            telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "error"})
+            telemetry.record("house_sensors.discovery_duration_ms", (time.monotonic() - started_at) * 1000, {"operation.type": "background"})
+            return
+
+        telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "success"})
+        telemetry.record("house_sensors.discovery_duration_ms", (time.monotonic() - started_at) * 1000, {"operation.type": "background"})
+        telemetry.record("house_sensors.monitored_devices", len(self.devices), {"operation.type": "background"})
 
     async def collect_device_data(self, ip: str, device: Device) -> Optional[dict]:
         """Collect voltage/power data from a single device using new API"""
@@ -243,6 +265,7 @@ class VoltageCollector:
 
             if not emeter_data:
                 logger.warning(f"No energy data available for {device.alias if hasattr(device, 'alias') else ip}")
+                telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "empty"})
                 return None
 
             # Handle different data formats
@@ -291,11 +314,13 @@ class VoltageCollector:
                 "total": total,
             }
 
+            telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "success"})
             return data
 
         except Exception as e:
             device_name = device.alias if hasattr(device, "alias") else ip
             logger.error(f"Error collecting data from {device_name} ({ip}): {e}")
+            telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "error"})
             return None
 
     def write_to_influxdb(self, data: dict):
@@ -321,9 +346,11 @@ class VoltageCollector:
 
             write_api = self.influx_client.write_api(write_options=SYNCHRONOUS)
             write_api.write(bucket=bucket, record=point)
+            telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "polling", "outcome": "success"})
 
         except Exception as e:
             logger.error(f"Error writing to InfluxDB: {e}")
+            telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "polling", "outcome": "error"})
 
     def write_to_prometheus(self, data: dict):
         """Update Prometheus metrics"""
@@ -357,6 +384,7 @@ class VoltageCollector:
 
         while True:
             try:
+                started_at = time.monotonic()
                 # Collect data from all devices
                 tasks = []
                 for ip, device in self.devices.items():
@@ -373,10 +401,15 @@ class VoltageCollector:
                         self.write_to_influxdb(result)
                         self.write_to_prometheus(result)
 
+                telemetry.record("house_sensors.collection_loop_duration_ms", (time.monotonic() - started_at) * 1000, {"operation.type": "polling"})
+                successful_results = len([result for result in results if isinstance(result, dict)])
+                telemetry.record("house_sensors.collection_loop_results", successful_results, {"operation.type": "polling"})
+                telemetry.count("house_sensors.collection_loops", attributes={"operation.type": "polling", "outcome": "success"})
                 await asyncio.sleep(self.config["collection_interval"])
 
             except Exception as e:
                 logger.error(f"Error in collection loop: {e}")
+                telemetry.count("house_sensors.collection_loops", attributes={"operation.type": "polling", "outcome": "error"})
                 await asyncio.sleep(5)  # Wait before retrying
 
     async def run(self):

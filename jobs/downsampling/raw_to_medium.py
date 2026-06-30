@@ -26,6 +26,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from app_telemetry import telemetry_from_env
 from dateutil.tz import tzutc
 
 try:
@@ -49,6 +50,7 @@ DEFAULT_STATE_FILE = "/state/raw_to_medium_state.json"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO), format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("raw_to_medium_downsampler")
+telemetry = telemetry_from_env("house-sensors.downsampling-medium")
 
 
 @dataclass(frozen=True)
@@ -223,6 +225,8 @@ def load_state(config: Config) -> dict[str, Any]:
         return {
             "minute_thresholds": copy.deepcopy(config.initial_minute_thresholds),
             "last_stop_iso": None,
+            "coverage_start_iso": None,
+            "coverage_stop_iso": None,
         }
     try:
         raw = json.loads(config.state_file.read_text())
@@ -232,6 +236,8 @@ def load_state(config: Config) -> dict[str, Any]:
     return {
         "minute_thresholds": _normalize_minute_thresholds(raw.get("minute_thresholds") or {}, config.params),
         "last_stop_iso": raw.get("last_stop_iso"),
+        "coverage_start_iso": raw.get("coverage_start_iso"),
+        "coverage_stop_iso": raw.get("coverage_stop_iso"),
     }
 
 
@@ -240,6 +246,8 @@ def save_state(config: Config, state: dict[str, Any]) -> None:
     payload = {
         "minute_thresholds": _normalize_minute_thresholds(state.get("minute_thresholds") or {}, config.params),
         "last_stop_iso": state.get("last_stop_iso"),
+        "coverage_start_iso": state.get("coverage_start_iso"),
+        "coverage_stop_iso": state.get("coverage_stop_iso"),
         "updated_at": dt.datetime.now(tz=tzutc()).isoformat(),
     }
     tmp_path = config.state_file.with_suffix(config.state_file.suffix + ".tmp")
@@ -684,6 +692,12 @@ def run_once(config: Config) -> dict[str, Any]:
     totals = {"chunks": 0, "minutes": 0, "series": 0, "anomalies": 0, "wrote": 0}
     minute_thresholds = _normalize_minute_thresholds(state.get("minute_thresholds") or {}, config.params)
     should_learn = config.learn_thresholds and window_can_learn
+    if not state.get("coverage_start_iso"):
+        state["coverage_start_iso"] = _iso(start)
+    else:
+        existing_start = _parse_time(state["coverage_start_iso"])
+        if start < existing_start:
+            state["coverage_start_iso"] = _iso(start)
 
     log.info(
         "raw-to-medium downsample | window=[%s -> %s] | power=%s env=%s medium=%s | chunk=%sm | dry_run=%s | learn=%s",
@@ -717,6 +731,7 @@ def run_once(config: Config) -> dict[str, Any]:
             if not config.dry_run:
                 state["minute_thresholds"] = minute_thresholds
                 state["last_stop_iso"] = _iso(nxt)
+                state["coverage_stop_iso"] = _iso(nxt)
                 save_state(config, state)
 
             rate = stats["anomalies"] / max(1, stats["series"]) if stats["series"] else 0.0
@@ -745,6 +760,13 @@ def run_once(config: Config) -> dict[str, Any]:
         totals["wrote"],
         elapsed,
     )
+    attrs = {"operation.type": "background", "job": "raw_to_medium", "outcome": "success"}
+    telemetry.count("house_sensors.job_cycles", attributes=attrs)
+    telemetry.record("house_sensors.job_duration_ms", elapsed * 1000, attrs)
+    telemetry.record("house_sensors.job_chunks", totals["chunks"], attrs)
+    telemetry.record("house_sensors.job_series", totals["series"], attrs)
+    telemetry.record("house_sensors.job_anomalies", totals["anomalies"], attrs)
+    telemetry.record("house_sensors.job_points_written", totals["wrote"], attrs)
     return {**totals, "elapsed_seconds": elapsed}
 
 
@@ -754,8 +776,10 @@ def run_loop(config: Config) -> None:
             run_once(config)
         except ValueError as exc:
             log.info("no raw-to-medium work this cycle: %s", exc)
+            telemetry.count("house_sensors.job_cycles", attributes={"operation.type": "background", "job": "raw_to_medium", "outcome": "no_work"})
         except Exception as exc:
             log.error("raw-to-medium cycle failed: %s", exc)
+            telemetry.count("house_sensors.job_cycles", attributes={"operation.type": "background", "job": "raw_to_medium", "outcome": "error"})
             traceback.print_exc()
         time.sleep(config.interval_seconds)
 
