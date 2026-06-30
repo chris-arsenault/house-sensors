@@ -310,7 +310,14 @@ def _write_sync(config: Config, ic: Any, points: list[Any]) -> int:
     return len(points)
 
 
-def _influx_api_json(config: Config, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _influx_api_json(
+    config: Config,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    not_found_ok: bool = False,
+) -> dict[str, Any]:
     url = f"{config.influx_url.rstrip('/')}{path}"
     body = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {
@@ -327,6 +334,8 @@ def _influx_api_json(config: Config, method: str, path: str, payload: dict[str, 
             return json.loads(raw or "{}")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        if exc.code == 404 and not_found_ok:
+            return {}
         raise RuntimeError(f"InfluxDB API {method} {path} failed with HTTP {exc.code}: {detail}") from exc
 
 
@@ -335,7 +344,7 @@ def ensure_medium_bucket(config: Config) -> None:
         return
 
     query = urllib.parse.urlencode({"name": config.medium_bucket, "org": config.influx_org})
-    buckets = _influx_api_json(config, "GET", f"/api/v2/buckets?{query}").get("buckets") or []
+    buckets = _influx_api_json(config, "GET", f"/api/v2/buckets?{query}", not_found_ok=True).get("buckets") or []
     if buckets:
         log.info("medium bucket exists: %s", config.medium_bucket)
         return

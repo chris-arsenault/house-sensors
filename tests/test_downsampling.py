@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
+import json
+import urllib.error
 from dataclasses import replace
 
 import numpy as np
@@ -56,6 +59,36 @@ def _raw_config(tmp_path):
         medium_retention_seconds=0,
         abs_bounds=raw_downsampling._default_abs_bounds(params),
         initial_minute_thresholds=raw_downsampling._default_minute_thresholds(params),
+    )
+
+
+def _long_config(tmp_path):
+    params = list(downsampling.DEFAULT_PARAMS)
+    return downsampling.Config(
+        influx_url="http://influx.example",
+        influx_token="token",
+        influx_org="ahara",
+        src_bucket="sensors-medium",
+        dst_bucket="sensors-long",
+        measurement="sensors",
+        params=params,
+        tags=list(downsampling.DEFAULT_TAGS),
+        start_iso=None,
+        end_iso=None,
+        days_back=1,
+        chunk_minutes=360,
+        dry_run=True,
+        state_file=tmp_path / "medium-to-long-state.json",
+        interval_seconds=3600,
+        delay_minutes=10,
+        quantile=0.95,
+        alpha=0.2,
+        target_anomaly_rate=0.05,
+        rate_beta=0.25,
+        ensure_dst_bucket=True,
+        dst_retention_seconds=0,
+        abs_bounds=downsampling._default_abs_bounds(params),
+        initial_hour_thresholds=downsampling._default_hour_thresholds(params),
     )
 
 
@@ -124,6 +157,43 @@ class _FakeRecord:
         return self._timestamp
 
 
+class _FakeHttpResponse:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode()
+
+
+def _install_fake_bucket_api(monkeypatch, module, bucket_name):
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append((request.get_method(), request.full_url, request.data))
+        if request.get_method() == "GET" and f"name={bucket_name}" in request.full_url:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                404,
+                "Not Found",
+                hdrs=None,
+                fp=io.BytesIO(b'{"code":"not found","message":"bucket not found"}'),
+            )
+        if request.get_method() == "GET" and "/api/v2/orgs?" in request.full_url:
+            return _FakeHttpResponse({"orgs": [{"id": "org-id"}]})
+        if request.get_method() == "POST" and request.full_url.endswith("/api/v2/buckets"):
+            return _FakeHttpResponse({"id": "bucket-id"})
+        raise AssertionError(f"unexpected request: {request.get_method()} {request.full_url}")
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+    return calls
+
+
 def test_oscillation_count_ignores_flat_steps():
     assert downsampling._oscillation_count(np.array([1.0, 2.0, 2.0, 1.0, 3.0, 2.0])) == 3
 
@@ -169,6 +239,26 @@ def test_minute_is_anomaly_checks_bounds_thresholds_and_oscillation():
     assert raw_downsampling.minute_is_anomaly("voltage", 118.0, 124.0, 6.0, 0.2, 0, abs_bounds, thresholds)
     assert raw_downsampling.minute_is_anomaly("voltage", 118.0, 120.0, 1.0, 0.2, 4, abs_bounds, thresholds)
     assert not raw_downsampling.minute_is_anomaly("voltage", 118.0, 120.0, 1.0, 0.2, 1, abs_bounds, thresholds)
+
+
+def test_raw_to_medium_creates_bucket_when_influx_lookup_returns_404(tmp_path, monkeypatch):
+    config = replace(_raw_config(tmp_path), ensure_medium_bucket=True)
+    calls = _install_fake_bucket_api(monkeypatch, raw_downsampling, "sensors-medium")
+
+    raw_downsampling.ensure_medium_bucket(config)
+
+    assert [method for method, _, _ in calls] == ["GET", "GET", "POST"]
+    assert json.loads(calls[-1][2].decode())["name"] == "sensors-medium"
+
+
+def test_medium_to_long_creates_bucket_when_influx_lookup_returns_404(tmp_path, monkeypatch):
+    config = _long_config(tmp_path)
+    calls = _install_fake_bucket_api(monkeypatch, downsampling, "sensors-long")
+
+    downsampling.ensure_destination_bucket(config)
+
+    assert [method for method, _, _ in calls] == ["GET", "GET", "POST"]
+    assert json.loads(calls[-1][2].decode())["name"] == "sensors-long"
 
 
 def test_update_minute_thresholds_learns_quantiles_and_rate_feedback():
