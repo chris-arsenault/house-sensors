@@ -1,6 +1,6 @@
 # Architecture
 
-House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker Compose stack for TrueNAS. The TrueNAS stack runs two Python polling collectors, one Python downsampling job, and one nginx-hosted management UI.
+House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker Compose stack for TrueNAS. The TrueNAS stack runs two Python polling collectors, two Python downsampling jobs, and one nginx-hosted management UI.
 
 ## Components
 
@@ -9,7 +9,8 @@ House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker C
 | `environment-sensors` | `collectors/environment-sensors/` | `ghcr.io/chris-arsenault/house-sensors/collectors/environment-sensors:${IMAGE_TAG}` | `host` |
 | `volt` | `collectors/volt/` | `ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG}` | `host` |
 | `volt-event` | `management/volt-event/` | `ghcr.io/chris-arsenault/house-sensors/management/volt-event:${IMAGE_TAG}` | Published on `192.168.66.3:8085` |
-| `downsampling` | `jobs/downsampling/` | `ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG}` | Default bridge network |
+| `downsampling-medium` | `jobs/downsampling/` | `ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG}` | Default bridge network |
+| `downsampling-long` | `jobs/downsampling/` | `ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG}` | Default bridge network |
 
 ## Firmware
 
@@ -25,7 +26,9 @@ The firmware exposes `/sensors` with temperature, humidity, pressure, timestamps
 
 `volt-event` serves a static event logger UI. Browser requests post line protocol to `/api/influx/write`; nginx proxies those writes to InfluxDB with the token supplied by Komodo.
 
-`downsampling` reads the medium-resolution `sensors-medium` bucket and writes long-term points to `sensors-long`. It stores learned hour thresholds and a processed watermark in the `downsampling-state` Docker volume.
+`downsampling-medium` reads the raw `environment-data` and `voltage-data` buckets, normalizes both domains into the `sensors-medium` bucket, writes calm series as `resolution=1m` aggregate points, and preserves anomalous readings as `resolution=1s` points. It stores learned minute thresholds and a processed watermark in the `downsampling-medium-state` Docker volume.
+
+`downsampling-long` reads the normalized `sensors-medium` bucket and writes long-term points to `sensors-long`. It writes calm series as `resolution=1h` aggregate points and preserves anomalous `resolution=1m` and `resolution=1s` detail. It stores learned hour thresholds and a processed watermark in the `downsampling-long-state` Docker volume.
 
 The stack follows Harbor's VPN-only TrueNAS pattern. The UI is reachable on the TrueNAS LAN/VPN address, and no `reverse_proxy_routes` entry is registered in `ahara-infra`.
 
@@ -44,7 +47,7 @@ Firmware device credentials are supplied through an ignored `secrets.py` copied 
 | `KASA_USERNAME` | `volt` | `/ahara/house-sensors/volt/kasa-username` |
 | `KASA_PASSWORD` | `volt` | `/ahara/house-sensors/volt/kasa-password` |
 | `VOLT_EVENT_INFLUX_TOKEN` | `volt-event` | `/ahara/observability/influxdb-admin-token` |
-| `DOWNSAMPLER_INFLUX_TOKEN` | `downsampling` | `/ahara/observability/influxdb-admin-token` |
+| `DOWNSAMPLER_INFLUX_TOKEN` | `downsampling-medium`, `downsampling-long` | `/ahara/observability/influxdb-admin-token` |
 
 ## Image Packaging
 

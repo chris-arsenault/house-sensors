@@ -48,8 +48,44 @@ services:
     ports:
       - "192.168.66.3:8085:80"
 
-  downsampling:
+  downsampling-medium:
     image: ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG:-latest}
+    command: ["python", "-u", "raw_to_medium.py", "run-loop"]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      INFLUX_URL: "http://192.168.66.3:30115"
+      INFLUX_ORG: "ahara"
+      INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
+      DOWNSAMPLE_RAW_POWER_BUCKET: "voltage-data"
+      DOWNSAMPLE_RAW_ENV_BUCKET: "environment-data"
+      DOWNSAMPLE_MEDIUM_BUCKET: "sensors-medium"
+      DOWNSAMPLE_MEDIUM_MEASUREMENT: "sensors"
+      DOWNSAMPLE_MEDIUM_STATE_FILE: "/state/raw_to_medium_state.json"
+      DOWNSAMPLE_MEDIUM_DAYS_BACK: "60"
+      DOWNSAMPLE_MEDIUM_CHUNK_MINUTES: "60"
+      DOWNSAMPLE_MEDIUM_INTERVAL_SECONDS: "60"
+      DOWNSAMPLE_MEDIUM_DELAY_SECONDS: "60"
+      DOWNSAMPLE_MEDIUM_OVERLAP_MINUTES: "5"
+      DOWNSAMPLE_MINUTE_THRESHOLD_QUANTILE: "0.95"
+      DOWNSAMPLE_MINUTE_THRESHOLD_ALPHA: "0.2"
+      DOWNSAMPLE_MINUTE_TARGET_ANOM_RATE: "0.05"
+      DOWNSAMPLE_MINUTE_RATE_BETA: "0.25"
+      DOWNSAMPLE_MEDIUM_LEARN_THRESHOLDS: "true"
+      DOWNSAMPLE_MEDIUM_LEARN_INCREMENTAL: "false"
+      DOWNSAMPLE_ENSURE_MEDIUM_BUCKET: "true"
+      DOWNSAMPLE_MEDIUM_RETENTION_SECONDS: "0"
+      DOWNSAMPLE_ABS_BOUNDS_JSON: "{}"
+      DOWNSAMPLE_MINUTE_THRESH_JSON: "{}"
+    volumes:
+      - downsampling-medium-state:/state
+
+  downsampling-long:
+    image: ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG:-latest}
+    command: ["python", "-u", "medium_to_long_backfill.py", "run-loop"]
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
@@ -76,7 +112,8 @@ services:
       DOWNSAMPLE_ABS_BOUNDS_JSON: "{}"
       DOWNSAMPLE_HOUR_THRESH_JSON: "{}"
     volumes:
-      - downsampling-state:/state
+      - downsampling-long-state:/state
 
 volumes:
-  downsampling-state:
+  downsampling-medium-state:
+  downsampling-long-state:

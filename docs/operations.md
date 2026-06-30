@@ -9,7 +9,8 @@ Komodo deploys [compose.yaml](../compose.yaml) on TrueNAS. The stack follows the
 | `environment-sensors` | Host network for UDP discovery and device polling. |
 | `volt` | Host network for Kasa discovery and polling. |
 | `volt-event` | TrueNAS LAN address `192.168.66.3:8085` mapped to container port `80`. |
-| `downsampling` | Looping background job with a persistent `downsampling-state` Docker volume. |
+| `downsampling-medium` | Looping raw-to-medium background job with a persistent `downsampling-medium-state` Docker volume. |
+| `downsampling-long` | Looping medium-to-long background job with a persistent `downsampling-long-state` Docker volume. |
 
 Deploys run from the shared Ahara workflow declared by [.github/workflows/ci.yml](../.github/workflows/ci.yml) and [platform.yml](../platform.yml). The workflow builds the component images, pushes them to GHCR under `ghcr.io/chris-arsenault/house-sensors/...`, sets `IMAGE_TAG` to the git SHA, resolves SSM-backed variables, and asks Komodo to deploy.
 
@@ -45,16 +46,18 @@ The collectors and event UI write to InfluxDB buckets:
 | ---- | ---- |
 | `environment-data` | `environment-sensors` |
 | `voltage-data` | `volt`, `volt-event` |
-| `sensors-medium` | Source bucket for medium-resolution rollups. |
+| `sensors-medium` | Destination bucket for raw-to-medium rollups and source bucket for medium-to-long rollups. |
 | `sensors-long` | Destination bucket for long-term rollups. |
 
 The configured Influx URLs are in `compose.yaml`.
 
 ## Downsampling
 
-The `downsampling` service replaces the old Windmill medium-to-long job with a direct Python process. On first boot, it backfills `DOWNSAMPLE_DAYS_BACK` days. After that, it uses the saved `last_stop_iso` watermark in `/state/medium_to_long_state.json` and processes only newly completed hours.
+The `downsampling-medium` service reads both raw sensor buckets, writes normalized per-minute points to `sensors-medium`, and preserves anomalous seconds. On first boot, it backfills `DOWNSAMPLE_MEDIUM_DAYS_BACK` days. After that, it uses the saved `last_stop_iso` watermark in `/state/raw_to_medium_state.json`, overlaps the last few minutes for late points, and processes newly completed minutes.
 
-The job learns hour thresholds from observed data and stores them in the same state file. Delete or edit the `downsampling-state` volume only when intentionally resetting the learned thresholds and watermark.
+The `downsampling-long` service reads `sensors-medium`, writes hourly points to `sensors-long`, and preserves anomalous minute and second detail. On first boot, it backfills `DOWNSAMPLE_DAYS_BACK` days. After that, it uses the saved `last_stop_iso` watermark in `/state/medium_to_long_state.json` and processes newly completed hours.
+
+Both jobs learn thresholds from observed data and store them in their state files. Delete or edit the `downsampling-medium-state` or `downsampling-long-state` volumes only when intentionally resetting learned thresholds and watermarks.
 
 ## Health Checks
 

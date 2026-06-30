@@ -19,7 +19,7 @@ This command runs:
 | Step | Command |
 | ---- | ---- |
 | Compose validation | `docker compose --env-file .env.example -f compose.yaml config` |
-| Python lint | `python3 -m ruff check collectors tests` |
+| Python lint | `python3 -m ruff check collectors jobs tests` |
 | Firmware syntax | `python3 -c "compile(...)"` |
 | Shell syntax | `sh -n management/volt-event/docker-entrypoint.sh` |
 | Tests | `python3 -m pytest` |
@@ -50,7 +50,7 @@ Add unit tests for parsing, conversion, and config behavior under `tests/`. Keep
 
 Keep scheduled or looping jobs under `jobs/<name>/`. Job directories follow the same component image pattern as collectors: `Dockerfile`, `requirements.txt`, source, and focused unit tests for business logic.
 
-The downsampling job is intentionally a direct Python process, not a Windmill task. Runtime state belongs in its mounted state volume, and operator visibility comes from container logs plus the JSON state file.
+Downsampling jobs are intentionally direct Python processes. Runtime state belongs in their mounted state volumes, and operator visibility comes from container logs plus the JSON state files.
 
 ## Adding Firmware Code
 

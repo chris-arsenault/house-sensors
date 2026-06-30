@@ -39,7 +39,7 @@ TrueNAS-hosted environment sensor stack with MicroPython firmware, Python collec
 | `firmware/atoms3u-env3/` | MicroPython firmware for M5 AtomS3U ENV-III sensor devices. |
 | `collectors/environment-sensors/` | Python environment sensor collector and image packaging. |
 | `collectors/volt/` | Python Kasa voltage collector and image packaging. |
-| `jobs/downsampling/` | Lightweight medium-to-long downsampling service and image packaging. |
+| `jobs/downsampling/` | Lightweight raw-to-medium and medium-to-long downsampling services and image packaging. |
 | `management/volt-event/` | Nginx event logger UI and image packaging. |
 | `tests/` | Unit tests for collector parsing, config, and conversion behavior. |
 | `docs/` | Current-state architecture, development, operations, ADRs, and backlog. |

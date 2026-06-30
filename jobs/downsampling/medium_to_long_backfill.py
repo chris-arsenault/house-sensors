@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Medium-to-long sensor downsampling job.
 
-This ports the old Windmill job into a direct Python process suitable for a
-small Komodo-managed container. It reads 1m/1s records from the medium bucket,
-writes calm hours as 1h records to the long bucket, preserves anomalous 1m/1s
-records, and stores learned hour thresholds in a local JSON state file.
+This direct Python process reads 1m/1s records from the medium bucket, writes
+calm hours as 1h records to the long bucket, preserves anomalous 1m/1s records,
+and stores learned hour thresholds in a local JSON state file.
 """
 
 from __future__ import annotations
