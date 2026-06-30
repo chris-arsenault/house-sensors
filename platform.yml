@@ -10,3 +10,4 @@ images:
   - collectors/environment-sensors
   - collectors/volt
   - management/volt-event
+  - jobs/downsampling

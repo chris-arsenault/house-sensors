@@ -47,3 +47,36 @@ services:
       INFLUX_TOKEN: "${VOLT_EVENT_INFLUX_TOKEN}"
     ports:
       - "192.168.66.3:8085:80"
+
+  downsampling:
+    image: ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG:-latest}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      INFLUX_URL: "http://192.168.66.3:30115"
+      INFLUX_ORG: "ahara"
+      INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
+      DOWNSAMPLE_SRC_BUCKET: "sensors-medium"
+      DOWNSAMPLE_DST_BUCKET: "sensors-long"
+      DOWNSAMPLE_MEASUREMENT: "sensors"
+      DOWNSAMPLE_STATE_FILE: "/state/medium_to_long_state.json"
+      DOWNSAMPLE_DAYS_BACK: "60"
+      DOWNSAMPLE_CHUNK_MINUTES: "360"
+      DOWNSAMPLE_INTERVAL_SECONDS: "3600"
+      DOWNSAMPLE_DELAY_MINUTES: "10"
+      DOWNSAMPLE_THRESHOLD_QUANTILE: "0.95"
+      DOWNSAMPLE_THRESHOLD_ALPHA: "0.2"
+      DOWNSAMPLE_TARGET_ANOM_RATE: "0.05"
+      DOWNSAMPLE_RATE_BETA: "0.25"
+      DOWNSAMPLE_ENSURE_DST_BUCKET: "true"
+      DOWNSAMPLE_DST_RETENTION_SECONDS: "0"
+      DOWNSAMPLE_ABS_BOUNDS_JSON: "{}"
+      DOWNSAMPLE_HOUR_THRESH_JSON: "{}"
+    volumes:
+      - downsampling-state:/state
+
+volumes:
+  downsampling-state:

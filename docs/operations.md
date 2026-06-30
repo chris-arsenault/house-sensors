@@ -9,6 +9,7 @@ Komodo deploys [compose.yaml](../compose.yaml) on TrueNAS. The stack follows the
 | `environment-sensors` | Host network for UDP discovery and device polling. |
 | `volt` | Host network for Kasa discovery and polling. |
 | `volt-event` | TrueNAS LAN address `192.168.66.3:8085` mapped to container port `80`. |
+| `downsampling` | Looping background job with a persistent `downsampling-state` Docker volume. |
 
 Deploys run from the shared Ahara workflow declared by [.github/workflows/ci.yml](../.github/workflows/ci.yml) and [platform.yml](../platform.yml). The workflow builds the component images, pushes them to GHCR under `ghcr.io/chris-arsenault/house-sensors/...`, sets `IMAGE_TAG` to the git SHA, resolves SSM-backed variables, and asks Komodo to deploy.
 
@@ -44,8 +45,16 @@ The collectors and event UI write to InfluxDB buckets:
 | ---- | ---- |
 | `environment-data` | `environment-sensors` |
 | `voltage-data` | `volt`, `volt-event` |
+| `sensors-medium` | Source bucket for medium-resolution rollups. |
+| `sensors-long` | Destination bucket for long-term rollups. |
 
 The configured Influx URLs are in `compose.yaml`.
+
+## Downsampling
+
+The `downsampling` service replaces the old Windmill medium-to-long job with a direct Python process. On first boot, it backfills `DOWNSAMPLE_DAYS_BACK` days. After that, it uses the saved `last_stop_iso` watermark in `/state/medium_to_long_state.json` and processes only newly completed hours.
+
+The job learns hour thresholds from observed data and stores them in the same state file. Delete or edit the `downsampling-state` volume only when intentionally resetting the learned thresholds and watermark.
 
 ## Health Checks
 

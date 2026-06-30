@@ -46,6 +46,12 @@ Keep each deployable collector in its own component directory under `collectors/
 
 Add unit tests for parsing, conversion, and config behavior under `tests/`. Keep tests network-free.
 
+## Adding Job Code
+
+Keep scheduled or looping jobs under `jobs/<name>/`. Job directories follow the same component image pattern as collectors: `Dockerfile`, `requirements.txt`, source, and focused unit tests for business logic.
+
+The downsampling job is intentionally a direct Python process, not a Windmill task. Runtime state belongs in its mounted state volume, and operator visibility comes from container logs plus the JSON state file.
+
 ## Adding Firmware Code
 
 Keep device firmware under `firmware/<device>/`. A firmware directory contains:

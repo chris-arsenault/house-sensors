@@ -19,6 +19,7 @@ make ci
 | `environment-sensors` | Discovers HTTP environment sensors and writes temperature, humidity, and pressure readings to InfluxDB. |
 | `volt` | Discovers Kasa energy-monitoring plugs and writes voltage, current, power, and total energy readings to InfluxDB. |
 | `volt-event` | Nginx-hosted house event logger UI that proxies event writes to InfluxDB. |
+| `downsampling` | Medium-to-long sensor rollup job that preserves anomalies and compresses calm hours. |
 
 ## Documentation
 

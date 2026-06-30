@@ -9,7 +9,7 @@ compose-config:
 	docker compose --env-file .env.example -f compose.yaml config >/tmp/house-sensors-compose.yaml
 
 lint: compose-config
-	python3 -m ruff check collectors tests
+	python3 -m ruff check collectors jobs tests
 	$(MAKE) firmware-check
 	sh -n management/volt-event/docker-entrypoint.sh
 
@@ -23,3 +23,4 @@ docker-build-images:
 	docker build -t house-sensors-environment-sensors:test collectors/environment-sensors
 	docker build -t house-sensors-volt:test collectors/volt
 	docker build -t house-sensors-volt-event:test management/volt-event
+	docker build -t house-sensors-downsampling:test jobs/downsampling

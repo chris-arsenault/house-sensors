@@ -2,3 +2,6 @@ pytest>=8.0
 ruff>=0.8
 PyYAML>=6.0.1
 requests>=2.32
+numpy>=1.26
+pandas>=2.0
+python-dateutil>=2.8
