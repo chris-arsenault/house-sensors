@@ -77,7 +77,9 @@ The collectors and event UI write to InfluxDB buckets:
 | `sensors-medium` | Destination bucket for raw-to-medium rollups and source bucket for medium-to-long rollups. |
 | `sensors-long` | Destination bucket for long-term rollups. |
 
-The configured Influx URLs are in `compose.yaml`.
+The configured Influx URL is the Ahara observability compatibility endpoint,
+`http://192.168.66.3:18086`, defined once in `compose.yaml` and reused by all
+writers.
 
 ## Downsampling
 
