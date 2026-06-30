@@ -1,6 +1,6 @@
 .PHONY: ci compose-config dashboards firmware-check lint test docker-build-images terraform-fmt-check dev-install
 
-ci: lint dashboards test docker-build-images
+ci: lint dashboards terraform-fmt-check test docker-build-images
 
 dev-install:
 	python3 -m pip install -r requirements-dev.txt
@@ -10,7 +10,6 @@ compose-config:
 
 lint: compose-config
 	python3 -m ruff check collectors jobs tests
-	$(MAKE) terraform-fmt-check
 	$(MAKE) firmware-check
 	sh -n management/volt-event/docker-entrypoint.sh
 
