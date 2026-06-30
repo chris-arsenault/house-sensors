@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>House Event Logger</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .screen {
+            display: none;
+        }
+
+        .screen.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2em;
+            font-weight: 600;
+        }
+
+        h2 {
+            color: #555;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            font-weight: 500;
+        }
+
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .event-btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .event-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(79, 172, 254, 0.3);
+        }
+
+        .event-btn.ac-on {
+            background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+        }
+
+        .event-btn.ac-off {
+            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            color: #333;
+        }
+
+        .event-btn.custom {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .custom-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            margin-bottom: 20px;
+            transition: border-color 0.3s ease;
+        }
+
+        .custom-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .time-buttons {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .time-btn {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            padding: 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .time-btn:hover {
+            background: #e9ecef;
+            transform: translateY(-1px);
+        }
+
+        .time-btn.selected {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .back-btn {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: background-color 0.3s ease;
+        }
+
+        .back-btn:hover {
+            background: #5a6268;
+        }
+
+        .confirm-btn {
+            background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .confirm-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 5px 15px rgba(86, 171, 47, 0.3);
+        }
+
+        .confirm-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.loading {
+            background: #cce7ff;
+            color: #004085;
+            border: 1px solid #b3d7ff;
+        }
+
+        .status-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            text-align: left;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-icon {
+            margin-right: 10px;
+            font-size: 18px;
+        }
+
+        .status-text {
+            color: #2d5a2d;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Main Event Selection Screen -->
+        <div id="eventScreen" class="screen active">
+            <h1>🏠 House Event Logger</h1>
+            <div class="button-group">
+                <button class="event-btn ac-on" onclick="selectEvent('AC ON')">❄️ AC On</button>
+                <button class="event-btn ac-off" onclick="selectEvent('AC OFF')">🌡️ AC Off</button>
+                <button class="event-btn custom" onclick="showCustomInput()">✏️ Custom Event</button>
+            </div>
+
+            <!-- Status Section -->
+            <div class="status-section">
+                <h3 style="margin-bottom: 15px; color: #333;">📡 System Status</h3>
+                <div class="status-item">
+                    <span class="status-icon">✅</span>
+                    <span class="status-text">Nginx proxy configured</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-icon">🔒</span>
+                    <span class="status-text">Credentials secured server-side</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-icon">🏠</span>
+                    <span class="status-text">Ready to log house events</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom Input Screen -->
+        <div id="customScreen" class="screen">
+            <h2>Custom Event</h2>
+            <input type="text" id="customEventInput" class="custom-input"
+                   placeholder="Enter custom event name..." maxlength="50">
+            <button class="event-btn custom" onclick="selectCustomEvent()">Continue</button>
+            <br><br>
+            <button class="back-btn" onclick="showEventScreen()">← Back</button>
+        </div>
+
+        <!-- Time Selection Screen -->
+        <div id="timeScreen" class="screen">
+            <h2>When did this happen?</h2>
+            <p id="selectedEventText" style="margin-bottom: 20px; color: #666;"></p>
+
+            <div class="time-buttons">
+                <button class="time-btn" onclick="selectTime(0)">Now</button>
+                <button class="time-btn" onclick="selectTime(1)">1 min ago</button>
+                <button class="time-btn" onclick="selectTime(2)">2 min ago</button>
+                <button class="time-btn" onclick="selectTime(3)">3 min ago</button>
+                <button class="time-btn" onclick="selectTime(4)">4 min ago</button>
+                <button class="time-btn" onclick="selectTime(5)">5 min ago</button>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <button class="back-btn" onclick="goBackFromTime()">← Back</button>
+                <button class="confirm-btn" id="confirmBtn" onclick="submitEvent()" disabled>
+                    📡 Send Event
+                </button>
+            </div>
+
+            <div id="status"></div>
+        </div>
+    </div>
+
+    <script>
+        let selectedEvent = '';
+        let selectedMinutes = null;
+        let isCustomEvent = false;
+
+        function selectEvent(eventName) {
+            selectedEvent = eventName;
+            isCustomEvent = false;
+            showTimeScreen();
+        }
+
+        function showCustomInput() {
+            document.getElementById('eventScreen').classList.remove('active');
+            document.getElementById('customScreen').classList.add('active');
+            document.getElementById('customEventInput').focus();
+        }
+
+        function selectCustomEvent() {
+            const customInput = document.getElementById('customEventInput');
+            if (customInput.value.trim()) {
+                selectedEvent = customInput.value.trim();
+                isCustomEvent = true;
+                showTimeScreen();
+            } else {
+                alert('Please enter a custom event name');
+            }
+        }
+
+        function showEventScreen() {
+            document.getElementById('customScreen').classList.remove('active');
+            document.getElementById('timeScreen').classList.remove('active');
+            document.getElementById('eventScreen').classList.add('active');
+            resetStatus();
+        }
+
+        function showTimeScreen() {
+            document.getElementById('eventScreen').classList.remove('active');
+            document.getElementById('customScreen').classList.remove('active');
+            document.getElementById('timeScreen').classList.add('active');
+            document.getElementById('selectedEventText').textContent = `Event: ${selectedEvent}`;
+            resetTimeSelection();
+            resetStatus();
+        }
+
+        function goBackFromTime() {
+            if (isCustomEvent) {
+                document.getElementById('timeScreen').classList.remove('active');
+                document.getElementById('customScreen').classList.add('active');
+            } else {
+                showEventScreen();
+            }
+        }
+
+        function selectTime(minutes) {
+            selectedMinutes = minutes;
+
+            // Update button states
+            document.querySelectorAll('.time-btn').forEach(btn => btn.classList.remove('selected'));
+            event.target.classList.add('selected');
+
+            // Enable confirm button
+            document.getElementById('confirmBtn').disabled = false;
+        }
+
+        function resetTimeSelection() {
+            selectedMinutes = null;
+            document.querySelectorAll('.time-btn').forEach(btn => btn.classList.remove('selected'));
+            document.getElementById('confirmBtn').disabled = true;
+        }
+
+        function resetStatus() {
+            document.getElementById('status').innerHTML = '';
+        }
+
+        async function submitEvent() {
+            const statusDiv = document.getElementById('status');
+
+            // Show loading status
+            statusDiv.innerHTML = '<div class="status loading">📤 Sending event to InfluxDB...</div>';
+
+            // Calculate timestamp (minutes ago)
+            const now = new Date();
+            const eventTime = new Date(now.getTime() - (selectedMinutes * 60 * 1000));
+            const timestamp = Math.floor(eventTime.getTime() * 1000000); // Convert to nanoseconds for InfluxDB
+
+            // Clean event name - replace spaces with underscores for tag values
+            const cleanEventName = selectedEvent.replace(/\s+/g, '_');
+
+            // Prepare InfluxDB line protocol data
+            const measurement = 'house_events';
+            const tags = `event_type=${cleanEventName}`;
+            const fields = `value=1i,description="${selectedEvent.replace(/"/g, '\\"')}"`;
+            const lineProtocol = `${measurement},${tags} ${fields} ${timestamp}`;
+
+            try {
+                // Use nginx proxy endpoint - credentials are handled server-side
+                const response = await fetch('/api/influx/write', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain; charset=utf-8',
+                        'Accept': 'application/json'
+                    },
+                    body: lineProtocol
+                });
+
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div class="status success">✅ Event successfully logged to InfluxDB!</div>';
+
+                    // Auto-return to main screen after success
+                    setTimeout(() => {
+                        showEventScreen();
+                        document.getElementById('customEventInput').value = '';
+                    }, 2000);
+                } else {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+            } catch (error) {
+                console.error('Error submitting event:', error);
+                statusDiv.innerHTML = `<div class="status error">❌ Error: ${error.message}<br><br>Please check the nginx proxy configuration.</div>`;
+            }
+        }
+
+        // Allow Enter key to submit custom event
+        document.getElementById('customEventInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                selectCustomEvent();
+            }
+        });
+    </script>
+</body>
+</html>

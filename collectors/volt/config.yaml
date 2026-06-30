@@ -1,0 +1,24 @@
+# config.yaml (save as collector/config.yaml)
+collection_interval: 1  # seconds
+
+# Device configuration (optional - will auto-discover if empty)
+devices:
+  # Example manual device configuration:
+  # "192.168.1.100":
+  #   name: "kitchen_outlet"
+  #   location: "kitchen"
+
+# InfluxDB configuration
+influxdb:
+  enabled: true
+  retention: "30d"
+
+# Prometheus configuration
+prometheus:
+  enabled: true
+  job_name: "voltage-monitoring"
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

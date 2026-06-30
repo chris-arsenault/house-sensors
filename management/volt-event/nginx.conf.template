@@ -1,0 +1,55 @@
+server {
+    listen 80;
+    server_name localhost;
+
+    # Serve static files
+    location / {
+        root /usr/share/nginx/html;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy to InfluxDB
+    location /api/influx/ {
+        # Remove /api/influx from the path when forwarding
+        rewrite ^/api/influx/(.*)$ /api/v2/$1?org=${INFLUX_ORG}&bucket=${INFLUX_BUCKET} break;
+
+        proxy_pass ${INFLUX_URL};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Add InfluxDB authentication headers
+        proxy_set_header Authorization "Token ${INFLUX_TOKEN}";
+
+        # Add query parameters for org and bucket
+        # set $args "$args&org=${INFLUX_ORG}&bucket=${INFLUX_BUCKET}";
+
+        # Handle CORS if needed
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
+        add_header Access-Control-Allow-Headers "Content-Type, Authorization";
+
+        # Handle preflight requests
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin *;
+            add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type, Authorization";
+            add_header Content-Length 0;
+            add_header Content-Type text/plain;
+            return 200;
+        }
+    }
+
+    # Health check endpoint
+    location /health {
+        add_header Content-Type text/plain;
+        return 200 "OK";
+    }
+
+    # Security headers
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+}

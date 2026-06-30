@@ -1,0 +1,49 @@
+services:
+  environment-sensors:
+    image: ghcr.io/chris-arsenault/house-sensors/environment-sensors:${IMAGE_TAG}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    network_mode: host
+    environment:
+      INFLUX_URL: "http://192.168.66.3:30115"
+      INFLUX_ORG: "ahara"
+      INFLUX_BUCKET: "environment-data"
+      INFLUX_TOKEN: "${ENV_SENSOR_INFLUX_TOKEN}"
+      DEVICE_USER: "${ENV_SENSOR_DEVICE_USER}"
+      DEVICE_PASS: "${ENV_SENSOR_DEVICE_PASS}"
+
+  volt:
+    image: ghcr.io/chris-arsenault/house-sensors/volt:${IMAGE_TAG}
+    container_name: volt
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    network_mode: host
+    environment:
+      INFLUXDB_URL: "http://192.168.66.3:30115"
+      INFLUXDB_TOKEN: "${VOLT_INFLUXDB_TOKEN}"
+      INFLUXDB_ORG: "ahara"
+      INFLUXDB_BUCKET: "voltage-data"
+      COLLECTION_INTERVAL: "1"
+      KASA_USERNAME: "${KASA_USERNAME}"
+      KASA_PASSWORD: "${KASA_PASSWORD}"
+
+  volt-event:
+    image: ghcr.io/chris-arsenault/house-sensors/volt-event:${IMAGE_TAG}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      INFLUX_URL: "http://192.168.1.3:30115"
+      INFLUX_ORG: "ahara"
+      INFLUX_BUCKET: "voltage-data"
+      INFLUX_TOKEN: "${VOLT_EVENT_INFLUX_TOKEN}"
+    ports:
+      - "8085:80"

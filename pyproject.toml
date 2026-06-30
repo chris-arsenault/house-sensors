@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py311"
+exclude = [
+  ".git",
+  ".sulion-paste",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
