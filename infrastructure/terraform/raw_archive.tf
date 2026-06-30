@@ -12,14 +12,6 @@ resource "aws_s3_bucket_public_access_block" "raw_archive" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_ownership_controls" "raw_archive" {
-  bucket = aws_s3_bucket.raw_archive.id
-
-  rule {
-    object_ownership = "BucketOwnerEnforced"
-  }
-}
-
 resource "aws_s3_bucket_versioning" "raw_archive" {
   bucket = aws_s3_bucket.raw_archive.id
 
@@ -53,35 +45,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "raw_archive" {
       days_after_initiation = 7
     }
   }
-}
-
-data "aws_iam_policy_document" "raw_archive_bucket" {
-  statement {
-    sid    = "DenyInsecureTransport"
-    effect = "Deny"
-
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-
-    actions = ["s3:*"]
-    resources = [
-      aws_s3_bucket.raw_archive.arn,
-      "${aws_s3_bucket.raw_archive.arn}/*",
-    ]
-
-    condition {
-      test     = "Bool"
-      variable = "aws:SecureTransport"
-      values   = ["false"]
-    }
-  }
-}
-
-resource "aws_s3_bucket_policy" "raw_archive" {
-  bucket = aws_s3_bucket.raw_archive.id
-  policy = data.aws_iam_policy_document.raw_archive_bucket.json
 }
 
 data "aws_iam_policy_document" "raw_archive_runtime" {
