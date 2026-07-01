@@ -3,6 +3,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import time
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,9 @@ class AppTelemetry:
             }
         )
         interval_ms = int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL", "30000"))
-        reader = PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=interval_ms)
+        session = _ingest_auth_session()
+        exporter = OTLPMetricExporter(session=session) if session is not None else OTLPMetricExporter()
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=interval_ms)
         self._provider = MeterProvider(resource=resource, metric_readers=[reader])
         metrics.set_meter_provider(self._provider)
         self._meter = metrics.get_meter(service_name)
@@ -74,6 +77,69 @@ class AppTelemetry:
         if self._provider is not None:
             self._provider.shutdown()
             self._provider = None
+
+
+class _CognitoClientCredentialsAuth:
+    """requests auth callable that attaches a Cognito client_credentials (M2M)
+    bearer token to OTLP export requests and refreshes it before expiry. Used to
+    authenticate to the Ahara telemetry ingest gateway."""
+
+    def __init__(self, client_id: str, client_secret: str, token_url: str, scope: str):
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._token_url = token_url
+        self._scope = scope
+        self._token: str | None = None
+        self._expires_at = 0.0
+
+    def _refresh(self) -> None:
+        import requests
+
+        data = {"grant_type": "client_credentials"}
+        if self._scope:
+            data["scope"] = self._scope
+        resp = requests.post(
+            self._token_url,
+            data=data,
+            auth=(self._client_id, self._client_secret),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        self._token = payload["access_token"]
+        # Refresh a minute before expiry; floor the lifetime so a tiny/absent
+        # expires_in still yields a sane cache window.
+        self._expires_at = time.monotonic() + max(int(payload.get("expires_in", 3600)) - 60, 30)
+
+    def __call__(self, request: Any) -> Any:
+        if self._token is None or time.monotonic() >= self._expires_at:
+            self._refresh()
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        return request
+
+
+def _ingest_auth_session() -> Any:
+    """Build a requests.Session that authenticates OTLP export with a Cognito
+    M2M token, or None when no ingest credentials are configured (local/dev)."""
+    client_id = os.getenv("OBS_INGEST_CLIENT_ID", "").strip()
+    client_secret = os.getenv("OBS_INGEST_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        return None
+
+    try:
+        import requests
+    except ImportError as exc:  # pragma: no cover - requests ships with the OTLP http exporter.
+        log.warning("OTEL ingest auth disabled; requests missing: %s", exc)
+        return None
+
+    token_url = os.getenv(
+        "OBS_INGEST_TOKEN_URL", "https://auth.services.ahara.io/oauth2/token"
+    ).strip()
+    scope = os.getenv("OBS_INGEST_SCOPE", "observability/ingest").strip()
+
+    session = requests.Session()
+    session.auth = _CognitoClientCredentialsAuth(client_id, client_secret, token_url, scope)
+    return session
 
 
 def telemetry_enabled() -> bool:

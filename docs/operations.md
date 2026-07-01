@@ -38,6 +38,14 @@ write outcomes, downsampling cycle duration, rows/points processed, archive
 uploads, and delete windows. The local Alloy collector in `ahara-observability`
 routes those metrics to VictoriaMetrics.
 
+The OTLP endpoint is fronted by the `ahara-observability` ingest gateway, which
+requires a Cognito machine-to-machine (client_credentials) token with the
+`observability/ingest` scope. Each telemetry service reads `OBS_INGEST_CLIENT_ID`
+/ `OBS_INGEST_CLIENT_SECRET` (SSM `/ahara/observability/ingest-*`, see
+[secret-paths.yml](../secret-paths.yml)); `app_telemetry.py` fetches and
+auto-refreshes the token and attaches it as a bearer credential on OTLP export.
+Without credentials configured (local/dev), export is unauthenticated as before.
+
 Each service sets a stable `OTEL_SERVICE_NAME` in [compose.yaml](../compose.yaml)
 under the `house-sensors` namespace. Keep metric attributes low-cardinality;
 do not attach raw device IPs, sensor IDs, or S3 object keys to app telemetry.

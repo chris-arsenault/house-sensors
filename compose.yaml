@@ -4,6 +4,11 @@ x-house-sensors-otel: &house-sensors-otel
   OTEL_METRIC_EXPORT_INTERVAL: "30000"
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_RESOURCE_ATTRIBUTES: "service.namespace=house-sensors,deployment.environment=truenas,project=house-sensors"
+  # Cognito M2M (client_credentials) auth for the observability ingest gateway.
+  OBS_INGEST_CLIENT_ID: "${OBS_INGEST_CLIENT_ID}"
+  OBS_INGEST_CLIENT_SECRET: "${OBS_INGEST_CLIENT_SECRET}"
+  OBS_INGEST_TOKEN_URL: "https://auth.services.ahara.io/oauth2/token"
+  OBS_INGEST_SCOPE: "observability/ingest"
 
 x-house-sensors-influx-url: &house-sensors-influx-url "http://192.168.66.3:18086"
 
