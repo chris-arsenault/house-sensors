@@ -80,6 +80,7 @@ class Config:
     raw_retention_days: int
     medium_retention_months: int
     chunk_hours: int
+    chunk_sleep_seconds: float
     interval_seconds: int
     archive_start_iso: str | None
     dry_run: bool
@@ -116,6 +117,7 @@ def load_config(args: argparse.Namespace) -> Config:
         raw_retention_days=int(os.getenv("RAW_ARCHIVE_RAW_RETENTION_DAYS", "30")),
         medium_retention_months=int(os.getenv("RAW_ARCHIVE_MEDIUM_RETENTION_MONTHS", "6")),
         chunk_hours=int(os.getenv("RAW_ARCHIVE_CHUNK_HOURS", "24")),
+        chunk_sleep_seconds=float(os.getenv("RAW_ARCHIVE_CHUNK_SLEEP_SECONDS", "0")),
         interval_seconds=int(os.getenv("RAW_ARCHIVE_INTERVAL_SECONDS", "3600")),
         archive_start_iso=args.start or os.getenv("RAW_ARCHIVE_START_ISO"),
         dry_run=args.dry_run or _as_bool(os.getenv("RAW_ARCHIVE_DRY_RUN")),
@@ -137,6 +139,8 @@ def load_config(args: argparse.Namespace) -> Config:
         raise ValueError("RAW_ARCHIVE_MEDIUM_RETENTION_MONTHS must be positive")
     if config.chunk_hours <= 0:
         raise ValueError("RAW_ARCHIVE_CHUNK_HOURS must be positive")
+    if config.chunk_sleep_seconds < 0:
+        raise ValueError("RAW_ARCHIVE_CHUNK_SLEEP_SECONDS cannot be negative")
     if config.interval_seconds <= 0:
         raise ValueError("RAW_ARCHIVE_INTERVAL_SECONDS must be positive")
     return config
@@ -460,8 +464,11 @@ def archive_raw(config: Config, state: dict[str, Any], ic: Any, s3: Any, stop: d
     totals: dict[str, int] = {"chunks": 0, "rows": 0}
 
     for bucket in config.raw_buckets:
-        fallback_start = discover_bucket_start(config, ic, bucket, stop)
-        start = _state_stop(state, "raw_exports", bucket, fallback_start)
+        export_info = (state.get("raw_exports") or {}).get(bucket) or {}
+        if export_info.get("last_stop_iso"):
+            start = _parse_time(export_info["last_stop_iso"])
+        else:
+            start = discover_bucket_start(config, ic, bucket, stop)
         start = _floor_hour(start)
         if start >= stop:
             log.info("raw archive current | bucket=%s watermark=%s stop=%s", bucket, _iso(start), _iso(stop))
@@ -477,6 +484,8 @@ def archive_raw(config: Config, state: dict[str, Any], ic: Any, s3: Any, stop: d
                 _set_state_stop(state, "raw_exports", bucket, nxt)
                 save_state(config, state)
             cur = nxt
+            if not config.dry_run and config.chunk_sleep_seconds > 0 and cur < stop:
+                time.sleep(config.chunk_sleep_seconds)
 
     return totals
 

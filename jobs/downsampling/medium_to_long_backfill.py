@@ -61,6 +61,10 @@ class Config:
     end_iso: str | None
     days_back: int
     chunk_minutes: int
+    write_batch_size: int
+    write_batch_sleep_seconds: float
+    chunk_sleep_seconds: float
+    advance_empty_windows: bool
     dry_run: bool
     state_file: Path
     interval_seconds: int
@@ -164,6 +168,10 @@ def load_config(args: argparse.Namespace) -> Config:
         end_iso=args.end or os.getenv("DOWNSAMPLE_END_ISO"),
         days_back=int(args.days_back or os.getenv("DOWNSAMPLE_DAYS_BACK", "60")),
         chunk_minutes=int(os.getenv("DOWNSAMPLE_CHUNK_MINUTES", "360")),
+        write_batch_size=int(os.getenv("DOWNSAMPLE_WRITE_BATCH_SIZE", "5000")),
+        write_batch_sleep_seconds=float(os.getenv("DOWNSAMPLE_WRITE_BATCH_SLEEP_SECONDS", "0")),
+        chunk_sleep_seconds=float(os.getenv("DOWNSAMPLE_CHUNK_SLEEP_SECONDS", "0")),
+        advance_empty_windows=_as_bool(os.getenv("DOWNSAMPLE_ADVANCE_EMPTY_WINDOWS"), False),
         dry_run=args.dry_run or _as_bool(os.getenv("DOWNSAMPLE_DRY_RUN")),
         state_file=Path(os.getenv("DOWNSAMPLE_STATE_FILE", DEFAULT_STATE_FILE)),
         interval_seconds=int(os.getenv("DOWNSAMPLE_INTERVAL_SECONDS", "3600")),
@@ -188,6 +196,12 @@ def load_config(args: argparse.Namespace) -> Config:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
     if config.chunk_minutes <= 0:
         raise ValueError("DOWNSAMPLE_CHUNK_MINUTES must be positive")
+    if config.write_batch_size <= 0:
+        raise ValueError("DOWNSAMPLE_WRITE_BATCH_SIZE must be positive")
+    if config.write_batch_sleep_seconds < 0:
+        raise ValueError("DOWNSAMPLE_WRITE_BATCH_SLEEP_SECONDS cannot be negative")
+    if config.chunk_sleep_seconds < 0:
+        raise ValueError("DOWNSAMPLE_CHUNK_SLEEP_SECONDS cannot be negative")
     if config.interval_seconds <= 0:
         raise ValueError("DOWNSAMPLE_INTERVAL_SECONDS must be positive")
     return config
@@ -200,6 +214,8 @@ def load_state(config: Config) -> dict[str, Any]:
             "last_stop_iso": None,
             "coverage_start_iso": None,
             "coverage_stop_iso": None,
+            "dst_bucket_id": None,
+            "dst_bucket_name": config.dst_bucket,
         }
     try:
         raw = json.loads(config.state_file.read_text())
@@ -211,6 +227,8 @@ def load_state(config: Config) -> dict[str, Any]:
         "last_stop_iso": raw.get("last_stop_iso"),
         "coverage_start_iso": raw.get("coverage_start_iso"),
         "coverage_stop_iso": raw.get("coverage_stop_iso"),
+        "dst_bucket_id": raw.get("dst_bucket_id"),
+        "dst_bucket_name": raw.get("dst_bucket_name") or config.dst_bucket,
     }
 
 
@@ -221,6 +239,8 @@ def save_state(config: Config, state: dict[str, Any]) -> None:
         "last_stop_iso": state.get("last_stop_iso"),
         "coverage_start_iso": state.get("coverage_start_iso"),
         "coverage_stop_iso": state.get("coverage_stop_iso"),
+        "dst_bucket_id": state.get("dst_bucket_id"),
+        "dst_bucket_name": state.get("dst_bucket_name") or config.dst_bucket,
         "updated_at": dt.datetime.now(tz=tzutc()).isoformat(),
     }
     tmp_path = config.state_file.with_suffix(config.state_file.suffix + ".tmp")
@@ -273,9 +293,15 @@ def _write_sync(config: Config, ic: Any, points: list[Any]) -> int:
         return 0
     if SYNCHRONOUS is None:
         raise RuntimeError("influxdb-client synchronous write API is required at runtime")
+    written = 0
     with ic.write_api(write_options=SYNCHRONOUS) as write_api:
-        write_api.write(bucket=config.dst_bucket, record=points)
-    return len(points)
+        for start in range(0, len(points), config.write_batch_size):
+            batch = points[start : start + config.write_batch_size]
+            write_api.write(bucket=config.dst_bucket, record=batch)
+            written += len(batch)
+            if config.write_batch_sleep_seconds > 0 and written < len(points):
+                time.sleep(config.write_batch_sleep_seconds)
+    return written
 
 
 def _influx_api_json(
@@ -307,15 +333,23 @@ def _influx_api_json(
         raise RuntimeError(f"InfluxDB API {method} {path} failed with HTTP {exc.code}: {detail}") from exc
 
 
-def ensure_destination_bucket(config: Config) -> None:
-    if not config.ensure_dst_bucket:
-        return
-
-    query = urllib.parse.urlencode({"name": config.dst_bucket, "org": config.influx_org})
+def get_bucket_id(config: Config, bucket_name: str) -> str | None:
+    query = urllib.parse.urlencode({"name": bucket_name, "org": config.influx_org})
     buckets = _influx_api_json(config, "GET", f"/api/v2/buckets?{query}", not_found_ok=True).get("buckets") or []
-    if buckets:
+    for bucket in buckets:
+        if bucket.get("name") == bucket_name:
+            return bucket.get("id")
+    return None
+
+
+def ensure_destination_bucket(config: Config) -> str | None:
+    if not config.ensure_dst_bucket:
+        return None
+
+    bucket_id = get_bucket_id(config, config.dst_bucket)
+    if bucket_id:
         log.info("destination bucket exists: %s", config.dst_bucket)
-        return
+        return bucket_id
 
     org_query = urllib.parse.urlencode({"org": config.influx_org})
     orgs = _influx_api_json(config, "GET", f"/api/v2/orgs?{org_query}").get("orgs") or []
@@ -326,7 +360,7 @@ def ensure_destination_bucket(config: Config) -> None:
     if config.dst_retention_seconds > 0:
         retention_rules.append({"type": "expire", "everySeconds": config.dst_retention_seconds})
 
-    _influx_api_json(
+    created = _influx_api_json(
         config,
         "POST",
         "/api/v2/buckets",
@@ -337,6 +371,37 @@ def ensure_destination_bucket(config: Config) -> None:
         },
     )
     log.info("destination bucket created: %s", config.dst_bucket)
+    return created.get("id") or get_bucket_id(config, config.dst_bucket)
+
+
+def sync_destination_bucket_identity(config: Config, state: dict[str, Any], bucket_id: str | None) -> bool:
+    if not bucket_id:
+        return False
+
+    previous_id = state.get("dst_bucket_id")
+    previous_name = state.get("dst_bucket_name")
+    has_progress = any(state.get(key) for key in ("last_stop_iso", "coverage_start_iso", "coverage_stop_iso"))
+    identity_missing = previous_id is None and has_progress
+    identity_changed = previous_id is not None and previous_id != bucket_id
+    name_changed = previous_name is not None and previous_name != config.dst_bucket
+
+    state["dst_bucket_id"] = bucket_id
+    state["dst_bucket_name"] = config.dst_bucket
+
+    if not (identity_missing or identity_changed or name_changed):
+        return False
+
+    log.warning(
+        "destination bucket identity changed or was not recorded; resetting derived watermark | previous=%s/%s current=%s/%s",
+        previous_name,
+        previous_id,
+        config.dst_bucket,
+        bucket_id,
+    )
+    state["last_stop_iso"] = None
+    state["coverage_start_iso"] = None
+    state["coverage_stop_iso"] = None
+    return True
 
 
 def _tag_value(value: Any) -> str:
@@ -674,6 +739,10 @@ def process_chunk(
 
 def run_once(config: Config) -> dict[str, Any]:
     state = load_state(config)
+    if not config.dry_run:
+        bucket_id = ensure_destination_bucket(config)
+        if sync_destination_bucket_identity(config, state, bucket_id):
+            save_state(config, state)
     start, stop = select_window(config, state)
     chunk = dt.timedelta(minutes=config.chunk_minutes)
     totals = {"chunks": 0, "hours": 0, "series": 0, "anom_series": 0, "wrote": 0, "wrote_1s": 0}
@@ -699,8 +768,6 @@ def run_once(config: Config) -> dict[str, Any]:
 
     client_type = _require_influx_client()
     started_at = time.time()
-    if not config.dry_run:
-        ensure_destination_bucket(config)
     with client_type(url=config.influx_url, token=config.influx_token, org=config.influx_org) as ic:
         cur = start
         while cur < stop:
@@ -710,11 +777,14 @@ def run_once(config: Config) -> dict[str, Any]:
             for key in ("hours", "series", "anom_series", "wrote", "wrote_1s"):
                 totals[key] += stats[key]
 
-            if not config.dry_run:
+            should_advance = config.advance_empty_windows or stats["series"] > 0 or stats["wrote"] > 0 or stats["wrote_1s"] > 0
+            if not config.dry_run and should_advance:
                 state["hour_thresholds"] = hour_thresholds
                 state["last_stop_iso"] = _iso(nxt)
                 state["coverage_stop_iso"] = _iso(nxt)
                 save_state(config, state)
+            elif not should_advance:
+                log.info("not advancing state for empty source window [%s -> %s]", _iso(cur), _iso(nxt))
 
             rate = stats["anom_series"] / max(1, stats["series"]) if stats["series"] else 0.0
             log.info(
@@ -730,6 +800,8 @@ def run_once(config: Config) -> dict[str, Any]:
                 hour_thresholds,
             )
             cur = nxt
+            if not config.dry_run and config.chunk_sleep_seconds > 0 and cur < stop:
+                time.sleep(config.chunk_sleep_seconds)
 
     elapsed = round(time.time() - started_at, 2)
     overall_rate = totals["anom_series"] / max(1, totals["series"]) if totals["series"] else 0.0

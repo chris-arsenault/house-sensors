@@ -72,6 +72,9 @@ class Config:
     end_iso: str | None
     days_back: int
     chunk_minutes: int
+    write_batch_size: int
+    write_batch_sleep_seconds: float
+    chunk_sleep_seconds: float
     dry_run: bool
     state_file: Path
     interval_seconds: int
@@ -184,6 +187,9 @@ def load_config(args: argparse.Namespace) -> Config:
         end_iso=args.end or os.getenv("DOWNSAMPLE_MEDIUM_END_ISO"),
         days_back=int(args.days_back or os.getenv("DOWNSAMPLE_MEDIUM_DAYS_BACK", "60")),
         chunk_minutes=int(os.getenv("DOWNSAMPLE_MEDIUM_CHUNK_MINUTES", "60")),
+        write_batch_size=int(os.getenv("DOWNSAMPLE_MEDIUM_WRITE_BATCH_SIZE", "5000")),
+        write_batch_sleep_seconds=float(os.getenv("DOWNSAMPLE_MEDIUM_WRITE_BATCH_SLEEP_SECONDS", "0")),
+        chunk_sleep_seconds=float(os.getenv("DOWNSAMPLE_MEDIUM_CHUNK_SLEEP_SECONDS", "0")),
         dry_run=args.dry_run or _as_bool(os.getenv("DOWNSAMPLE_MEDIUM_DRY_RUN")),
         state_file=Path(os.getenv("DOWNSAMPLE_MEDIUM_STATE_FILE", DEFAULT_STATE_FILE)),
         interval_seconds=int(os.getenv("DOWNSAMPLE_MEDIUM_INTERVAL_SECONDS", "60")),
@@ -211,6 +217,12 @@ def load_config(args: argparse.Namespace) -> Config:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
     if config.chunk_minutes <= 0:
         raise ValueError("DOWNSAMPLE_MEDIUM_CHUNK_MINUTES must be positive")
+    if config.write_batch_size <= 0:
+        raise ValueError("DOWNSAMPLE_MEDIUM_WRITE_BATCH_SIZE must be positive")
+    if config.write_batch_sleep_seconds < 0:
+        raise ValueError("DOWNSAMPLE_MEDIUM_WRITE_BATCH_SLEEP_SECONDS cannot be negative")
+    if config.chunk_sleep_seconds < 0:
+        raise ValueError("DOWNSAMPLE_MEDIUM_CHUNK_SLEEP_SECONDS cannot be negative")
     if config.interval_seconds <= 0:
         raise ValueError("DOWNSAMPLE_MEDIUM_INTERVAL_SECONDS must be positive")
     if config.delay_seconds < 0:
@@ -227,6 +239,8 @@ def load_state(config: Config) -> dict[str, Any]:
             "last_stop_iso": None,
             "coverage_start_iso": None,
             "coverage_stop_iso": None,
+            "medium_bucket_id": None,
+            "medium_bucket_name": config.medium_bucket,
         }
     try:
         raw = json.loads(config.state_file.read_text())
@@ -238,6 +252,8 @@ def load_state(config: Config) -> dict[str, Any]:
         "last_stop_iso": raw.get("last_stop_iso"),
         "coverage_start_iso": raw.get("coverage_start_iso"),
         "coverage_stop_iso": raw.get("coverage_stop_iso"),
+        "medium_bucket_id": raw.get("medium_bucket_id"),
+        "medium_bucket_name": raw.get("medium_bucket_name") or config.medium_bucket,
     }
 
 
@@ -248,6 +264,8 @@ def save_state(config: Config, state: dict[str, Any]) -> None:
         "last_stop_iso": state.get("last_stop_iso"),
         "coverage_start_iso": state.get("coverage_start_iso"),
         "coverage_stop_iso": state.get("coverage_stop_iso"),
+        "medium_bucket_id": state.get("medium_bucket_id"),
+        "medium_bucket_name": state.get("medium_bucket_name") or config.medium_bucket,
         "updated_at": dt.datetime.now(tz=tzutc()).isoformat(),
     }
     tmp_path = config.state_file.with_suffix(config.state_file.suffix + ".tmp")
@@ -305,9 +323,15 @@ def _write_sync(config: Config, ic: Any, points: list[Any]) -> int:
         return 0
     if SYNCHRONOUS is None:
         raise RuntimeError("influxdb-client synchronous write API is required at runtime")
+    written = 0
     with ic.write_api(write_options=SYNCHRONOUS) as write_api:
-        write_api.write(bucket=config.medium_bucket, record=points)
-    return len(points)
+        for start in range(0, len(points), config.write_batch_size):
+            batch = points[start : start + config.write_batch_size]
+            write_api.write(bucket=config.medium_bucket, record=batch)
+            written += len(batch)
+            if config.write_batch_sleep_seconds > 0 and written < len(points):
+                time.sleep(config.write_batch_sleep_seconds)
+    return written
 
 
 def _influx_api_json(
@@ -339,15 +363,23 @@ def _influx_api_json(
         raise RuntimeError(f"InfluxDB API {method} {path} failed with HTTP {exc.code}: {detail}") from exc
 
 
-def ensure_medium_bucket(config: Config) -> None:
-    if not config.ensure_medium_bucket:
-        return
-
-    query = urllib.parse.urlencode({"name": config.medium_bucket, "org": config.influx_org})
+def get_bucket_id(config: Config, bucket_name: str) -> str | None:
+    query = urllib.parse.urlencode({"name": bucket_name, "org": config.influx_org})
     buckets = _influx_api_json(config, "GET", f"/api/v2/buckets?{query}", not_found_ok=True).get("buckets") or []
-    if buckets:
+    for bucket in buckets:
+        if bucket.get("name") == bucket_name:
+            return bucket.get("id")
+    return None
+
+
+def ensure_medium_bucket(config: Config) -> str | None:
+    if not config.ensure_medium_bucket:
+        return None
+
+    bucket_id = get_bucket_id(config, config.medium_bucket)
+    if bucket_id:
         log.info("medium bucket exists: %s", config.medium_bucket)
-        return
+        return bucket_id
 
     org_query = urllib.parse.urlencode({"org": config.influx_org})
     orgs = _influx_api_json(config, "GET", f"/api/v2/orgs?{org_query}").get("orgs") or []
@@ -358,7 +390,7 @@ def ensure_medium_bucket(config: Config) -> None:
     if config.medium_retention_seconds > 0:
         retention_rules.append({"type": "expire", "everySeconds": config.medium_retention_seconds})
 
-    _influx_api_json(
+    created = _influx_api_json(
         config,
         "POST",
         "/api/v2/buckets",
@@ -369,6 +401,37 @@ def ensure_medium_bucket(config: Config) -> None:
         },
     )
     log.info("medium bucket created: %s", config.medium_bucket)
+    return created.get("id") or get_bucket_id(config, config.medium_bucket)
+
+
+def sync_medium_bucket_identity(config: Config, state: dict[str, Any], bucket_id: str | None) -> bool:
+    if not bucket_id:
+        return False
+
+    previous_id = state.get("medium_bucket_id")
+    previous_name = state.get("medium_bucket_name")
+    has_progress = any(state.get(key) for key in ("last_stop_iso", "coverage_start_iso", "coverage_stop_iso"))
+    identity_missing = previous_id is None and has_progress
+    identity_changed = previous_id is not None and previous_id != bucket_id
+    name_changed = previous_name is not None and previous_name != config.medium_bucket
+
+    state["medium_bucket_id"] = bucket_id
+    state["medium_bucket_name"] = config.medium_bucket
+
+    if not (identity_missing or identity_changed or name_changed):
+        return False
+
+    log.warning(
+        "medium bucket identity changed or was not recorded; resetting derived watermark | previous=%s/%s current=%s/%s",
+        previous_name,
+        previous_id,
+        config.medium_bucket,
+        bucket_id,
+    )
+    state["last_stop_iso"] = None
+    state["coverage_start_iso"] = None
+    state["coverage_stop_iso"] = None
+    return True
 
 
 def _field_regex(fields: list[str]) -> str:
@@ -693,6 +756,10 @@ def process_chunk(
 
 def run_once(config: Config) -> dict[str, Any]:
     state = load_state(config)
+    if not config.dry_run:
+        bucket_id = ensure_medium_bucket(config)
+        if sync_medium_bucket_identity(config, state, bucket_id):
+            save_state(config, state)
     start, stop, window_can_learn = select_window(config, state)
     if start >= stop:
         raise ValueError(f"Invalid or empty window: start={_iso(start)} stop={_iso(stop)}")
@@ -724,8 +791,6 @@ def run_once(config: Config) -> dict[str, Any]:
 
     client_type = _require_influx_client()
     started_at = time.time()
-    if not config.dry_run:
-        ensure_medium_bucket(config)
     with client_type(url=config.influx_url, token=config.influx_token, org=config.influx_org) as ic:
         cur = start
         while cur < stop:
@@ -756,6 +821,8 @@ def run_once(config: Config) -> dict[str, Any]:
                 minute_thresholds,
             )
             cur = nxt
+            if not config.dry_run and config.chunk_sleep_seconds > 0 and cur < stop:
+                time.sleep(config.chunk_sleep_seconds)
 
     elapsed = round(time.time() - started_at, 2)
     overall_rate = totals["anomalies"] / max(1, totals["series"]) if totals["series"] else 0.0

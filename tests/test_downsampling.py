@@ -44,6 +44,9 @@ def _raw_config(tmp_path):
         end_iso=None,
         days_back=1,
         chunk_minutes=60,
+        write_batch_size=5000,
+        write_batch_sleep_seconds=0,
+        chunk_sleep_seconds=0,
         dry_run=True,
         state_file=tmp_path / "raw-to-medium-state.json",
         interval_seconds=60,
@@ -77,6 +80,10 @@ def _long_config(tmp_path):
         end_iso=None,
         days_back=1,
         chunk_minutes=360,
+        write_batch_size=5000,
+        write_batch_sleep_seconds=0,
+        chunk_sleep_seconds=0,
+        advance_empty_windows=False,
         dry_run=True,
         state_file=tmp_path / "medium-to-long-state.json",
         interval_seconds=3600,
@@ -110,6 +117,7 @@ def _archive_config(tmp_path):
         raw_retention_days=30,
         medium_retention_months=6,
         chunk_hours=24,
+        chunk_sleep_seconds=0,
         interval_seconds=3600,
         archive_start_iso=None,
         dry_run=True,
@@ -194,6 +202,39 @@ def _install_fake_bucket_api(monkeypatch, module, bucket_name):
     return calls
 
 
+class _FakeWriteApi:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def write(self, bucket, record):
+        self.calls.append((bucket, list(record)))
+
+
+class _FakeWriteClient:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def write_api(self, write_options):
+        return _FakeWriteApi(self.calls)
+
+
+class _FakeInfluxClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
 def test_oscillation_count_ignores_flat_steps():
     assert downsampling._oscillation_count(np.array([1.0, 2.0, 2.0, 1.0, 3.0, 2.0])) == 3
 
@@ -259,6 +300,100 @@ def test_medium_to_long_creates_bucket_when_influx_lookup_returns_404(tmp_path, 
 
     assert [method for method, _, _ in calls] == ["GET", "GET", "POST"]
     assert json.loads(calls[-1][2].decode())["name"] == "sensors-long"
+
+
+def test_raw_to_medium_write_batches_points(tmp_path, monkeypatch):
+    calls = []
+    config = replace(_raw_config(tmp_path), write_batch_size=2)
+    points = [object(), object(), object(), object(), object()]
+    monkeypatch.setattr(raw_downsampling, "SYNCHRONOUS", object())
+
+    assert raw_downsampling._write_sync(config, _FakeWriteClient(calls), points) == 5
+    assert [bucket for bucket, _ in calls] == ["sensors-medium", "sensors-medium", "sensors-medium"]
+    assert [len(batch) for _, batch in calls] == [2, 2, 1]
+
+
+def test_medium_to_long_write_batches_points(tmp_path, monkeypatch):
+    calls = []
+    config = replace(_long_config(tmp_path), write_batch_size=2)
+    points = [object(), object(), object(), object(), object()]
+    monkeypatch.setattr(downsampling, "SYNCHRONOUS", object())
+
+    assert downsampling._write_sync(config, _FakeWriteClient(calls), points) == 5
+    assert [bucket for bucket, _ in calls] == ["sensors-long", "sensors-long", "sensors-long"]
+    assert [len(batch) for _, batch in calls] == [2, 2, 1]
+
+
+def test_medium_to_long_does_not_advance_empty_source_window(tmp_path, monkeypatch):
+    config = replace(
+        _long_config(tmp_path),
+        dry_run=False,
+        ensure_dst_bucket=False,
+        start_iso="2026-01-01T00:00:00Z",
+        end_iso="2026-01-01T01:00:00Z",
+    )
+    monkeypatch.setattr(downsampling, "_require_influx_client", lambda: _FakeInfluxClient)
+    monkeypatch.setattr(
+        downsampling,
+        "process_chunk",
+        lambda config, ic, start, stop, hour_thresholds: (
+            {"chunks": 1, "hours": 1, "series": 0, "anom_series": 0, "wrote": 0, "wrote_1s": 0},
+            hour_thresholds,
+        ),
+    )
+
+    result = downsampling.run_once(config)
+
+    assert result["series"] == 0
+    assert not config.state_file.exists()
+
+
+def test_raw_to_medium_resets_legacy_watermark_when_bucket_identity_missing(tmp_path):
+    config = _raw_config(tmp_path)
+    thresholds = raw_downsampling._default_minute_thresholds(config.params)
+    thresholds["voltage"] = {"spreadT": 1.5, "stdT": 0.5, "oscT": 3}
+    state = {
+        "minute_thresholds": thresholds,
+        "last_stop_iso": "2026-06-30T00:00:00Z",
+        "coverage_start_iso": "2026-06-01T00:00:00Z",
+        "coverage_stop_iso": "2026-06-30T00:00:00Z",
+        "medium_bucket_id": None,
+        "medium_bucket_name": config.medium_bucket,
+    }
+
+    reset = raw_downsampling.sync_medium_bucket_identity(config, state, "new-medium-bucket-id")
+
+    assert reset
+    assert state["medium_bucket_id"] == "new-medium-bucket-id"
+    assert state["medium_bucket_name"] == "sensors-medium"
+    assert state["last_stop_iso"] is None
+    assert state["coverage_start_iso"] is None
+    assert state["coverage_stop_iso"] is None
+    assert state["minute_thresholds"]["voltage"] == {"spreadT": 1.5, "stdT": 0.5, "oscT": 3}
+
+
+def test_medium_to_long_resets_watermark_when_destination_bucket_identity_changes(tmp_path):
+    config = _long_config(tmp_path)
+    thresholds = downsampling._default_hour_thresholds(config.params)
+    thresholds["voltage"] = {"spreadT": 2.5, "stdT": 0.8, "oscT": 4}
+    state = {
+        "hour_thresholds": thresholds,
+        "last_stop_iso": "2026-06-30T00:00:00Z",
+        "coverage_start_iso": "2026-06-01T00:00:00Z",
+        "coverage_stop_iso": "2026-06-30T00:00:00Z",
+        "dst_bucket_id": "old-long-bucket-id",
+        "dst_bucket_name": config.dst_bucket,
+    }
+
+    reset = downsampling.sync_destination_bucket_identity(config, state, "new-long-bucket-id")
+
+    assert reset
+    assert state["dst_bucket_id"] == "new-long-bucket-id"
+    assert state["dst_bucket_name"] == "sensors-long"
+    assert state["last_stop_iso"] is None
+    assert state["coverage_start_iso"] is None
+    assert state["coverage_stop_iso"] is None
+    assert state["hour_thresholds"]["voltage"] == {"spreadT": 2.5, "stdT": 0.8, "oscT": 4}
 
 
 def test_update_minute_thresholds_learns_quantiles_and_rate_feedback():
@@ -428,3 +563,37 @@ def test_raw_archive_delete_disabled_does_not_advance_delete_watermarks(tmp_path
     assert raw_archive.cleanup_medium(config, state, long, dt.datetime(2026, 5, 31, tzinfo=dt.UTC)) == 0
     assert state["raw_deletes"] == {}
     assert state["medium_delete"] == {}
+
+
+def test_raw_archive_uses_existing_export_watermark_without_discovery(tmp_path, monkeypatch):
+    config = replace(_archive_config(tmp_path), raw_buckets=["environment-data"], dry_run=False)
+    state = {
+        "raw_exports": {
+            "environment-data": {"last_stop_iso": "2026-01-01T00:00:00Z"},
+        },
+    }
+    exported = []
+
+    monkeypatch.setattr(
+        raw_archive,
+        "discover_bucket_start",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("discovery should not run with a saved watermark")),
+    )
+
+    def fake_export(config, ic, s3, bucket, start, stop):
+        exported.append((bucket, start, stop))
+        return 0
+
+    monkeypatch.setattr(raw_archive, "export_raw_chunk", fake_export)
+
+    result = raw_archive.archive_raw(config, state, object(), object(), dt.datetime(2026, 1, 2, tzinfo=dt.UTC))
+
+    assert result == {"chunks": 1, "rows": 0}
+    assert exported == [
+        (
+            "environment-data",
+            dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+            dt.datetime(2026, 1, 2, tzinfo=dt.UTC),
+        )
+    ]
+    assert state["raw_exports"]["environment-data"]["last_stop_iso"] == "2026-01-02T00:00:00Z"
