@@ -2,6 +2,15 @@
 
 All notable user-visible changes are recorded here.
 
+## Unreleased
+
+### Stack
+
+- Both collectors discover their devices across the routed gateway: the
+  discovery target is configurable and defaults to the home LAN broadcast
+  address, restoring sensor and energy-plug collection after the network
+  split moved the collectors onto the server subnet.
+
 ## v0.2.0 - 2026-06-30
 
 ### Stack

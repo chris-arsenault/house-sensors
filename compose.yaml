@@ -30,6 +30,10 @@ services:
       INFLUX_TOKEN: "${ENV_SENSOR_INFLUX_TOKEN}"
       DEVICE_USER: "${ENV_SENSOR_DEVICE_USER}"
       DEVICE_PASS: "${ENV_SENSOR_DEVICE_PASS}"
+      # Sensors live on the home LAN; this collector runs on the server
+      # subnet, so discovery is addressed at the home LAN broadcast and the
+      # gateway forwards it (ahara-vpn ADR-0011).
+      DISCOVERY_ADDRESS: "${IOT_DISCOVERY_ADDRESS:-192.168.65.255}"
 
   volt:
     image: ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG:-latest}
@@ -50,6 +54,7 @@ services:
       COLLECTION_INTERVAL: "1"
       KASA_USERNAME: "${KASA_USERNAME}"
       KASA_PASSWORD: "${KASA_PASSWORD}"
+      KASA_DISCOVERY_TARGET: "${IOT_DISCOVERY_ADDRESS:-192.168.65.255}"
 
   volt-event:
     image: ghcr.io/chris-arsenault/house-sensors/management/volt-event:${IMAGE_TAG:-latest}

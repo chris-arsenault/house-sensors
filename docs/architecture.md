@@ -21,9 +21,11 @@ The firmware exposes `/sensors` with temperature, humidity, pressure, timestamps
 
 ## Data Flow
 
-`environment-sensors` sends UDP discovery packets on the sensor subnet, validates `/sensors` responses, converts readings to Influx line protocol, and writes to the `environment-data` bucket.
+`environment-sensors` sends UDP discovery packets to `DISCOVERY_ADDRESS`, validates `/sensors` responses, converts readings to Influx line protocol, and writes to the `environment-data` bucket.
 
-`volt` discovers authenticated Kasa devices with energy-monitoring support, reads voltage/current/power/total energy data, and writes points to the `voltage-data` bucket.
+`volt` discovers authenticated Kasa devices with energy-monitoring support at `KASA_DISCOVERY_TARGET`, reads voltage/current/power/total energy data, and writes points to the `voltage-data` bucket.
+
+Both collectors run on the server subnet while the devices sit on the home LAN, so discovery is addressed at the home LAN's broadcast address (`IOT_DISCOVERY_ADDRESS` in the stack environment, default `192.168.65.255`). The VP2440 gateway forwards those directed broadcasts and the answers on declared flows; see ahara-vpn ADR-0011.
 
 `volt-event` serves a static event logger UI. Browser requests post line protocol to `/api/influx/write`; nginx proxies those writes to InfluxDB with the token supplied by Komodo.
 

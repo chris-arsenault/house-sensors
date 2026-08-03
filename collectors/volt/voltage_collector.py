@@ -86,6 +86,10 @@ class VoltageCollector:
             "devices": {
                 # Will be auto-discovered if empty
             },
+            # Devices live on the home LAN while this collector runs on the
+            # server subnet, so discovery is addressed at the home LAN's
+            # broadcast rather than the collector's own.
+            "discovery_target": os.getenv("KASA_DISCOVERY_TARGET", "255.255.255.255"),
         }
 
         # Try to load from file, but don't fail if file doesn't exist
@@ -191,9 +195,10 @@ class VoltageCollector:
             return
 
         # Auto-discovery - use all found devices
-        logger.info("Attempting automatic device discovery with authentication...")
+        target = self.config.get("discovery_target", "255.255.255.255")
+        logger.info("Attempting automatic device discovery with authentication (target=%s)...", target)
         try:
-            found_devices = await Discover.discover(timeout=10, credentials=credentials)
+            found_devices = await Discover.discover(target=target, timeout=10, credentials=credentials)
             logger.info(f"Auto-discovery found {len(found_devices)} authenticated devices")
             telemetry.record("house_sensors.discovered_devices", len(found_devices), {"operation.type": "background"})
 

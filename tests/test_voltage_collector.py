@@ -35,6 +35,16 @@ prometheus:
     assert collector.config["influxdb"]["url"] == "http://influx.local:8086"
     assert collector.config["influxdb"]["bucket"] == "file-bucket"
     assert collector.config["prometheus"]["job_name"] == "file-job"
+    assert collector.config["discovery_target"] == "255.255.255.255"
+
+
+def test_discovery_target_comes_from_the_environment(monkeypatch, tmp_path):
+    # Devices sit on the home LAN, one routed hop from this collector.
+    monkeypatch.setenv("KASA_DISCOVERY_TARGET", "192.168.65.255")
+
+    collector = volt_collector.VoltageCollector(config_path=str(tmp_path / "absent.yaml"))
+
+    assert collector.config["discovery_target"] == "192.168.65.255"
 
 
 def test_load_config_logs_secret_presence_without_secret_value(monkeypatch, tmp_path, caplog):
