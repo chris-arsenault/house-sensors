@@ -1,22 +1,15 @@
 # config.yaml (save as collector/config.yaml)
-collection_interval: 1  # seconds
+# Values here override the environment defaults in voltage_collector.py.
+drain_interval: 10  # seconds to sleep when the collector stream is empty
 
-# Device configuration (optional - will auto-discover if empty)
-devices:
-  # Example manual device configuration:
-  # "192.168.1.100":
-  #   name: "kitchen_outlet"
-  #   location: "kitchen"
+# ahara-collector appliance (the kasa stream producer)
+collector:
+  module: "kasa"
 
 # InfluxDB configuration
 influxdb:
   enabled: true
   retention: "30d"
-
-# Prometheus configuration
-prometheus:
-  enabled: true
-  job_name: "voltage-monitoring"
 
 # Logging configuration
 logging:

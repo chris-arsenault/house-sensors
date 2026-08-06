@@ -6,10 +6,13 @@ All notable user-visible changes are recorded here.
 
 ### Stack
 
-- Both collectors discover their devices across the routed gateway: the
-  discovery target is configurable and defaults to the home LAN broadcast
-  address, restoring sensor and energy-plug collection after the network
-  split moved the collectors onto the server subnet.
+- Both collectors now drain the ahara-collector appliance instead of
+  discovering and polling devices across the routed gateway: each drains
+  its own module stream (`envSensors`, `kasa`) of device-native reading
+  envelopes over the appliance's authenticated API and keeps sole
+  ownership of the Influx schema. Device credentials leave this stack for
+  the appliance's host state, and `volt` drops its python-kasa and
+  Prometheus dependencies.
 
 ## v0.2.0 - 2026-06-30
 

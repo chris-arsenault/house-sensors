@@ -28,12 +28,12 @@ services:
       INFLUX_ORG: "ahara"
       INFLUX_BUCKET: "environment-data"
       INFLUX_TOKEN: "${ENV_SENSOR_INFLUX_TOKEN}"
-      DEVICE_USER: "${ENV_SENSOR_DEVICE_USER}"
-      DEVICE_PASS: "${ENV_SENSOR_DEVICE_PASS}"
-      # Sensors live on the home LAN; this collector runs on the server
-      # subnet, so discovery is addressed at the home LAN broadcast and the
-      # gateway forwards it (ahara-vpn ADR-0011).
-      DISCOVERY_ADDRESS: "${IOT_DISCOVERY_ADDRESS:-192.168.65.255}"
+      # Sensors live on the home LAN behind the collector appliance, which
+      # holds the device credentials and does the discovery and polling;
+      # this collector drains its envSensors stream (ahara-collector
+      # ADR-0006/0007) and owns the environment schema.
+      COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.65.10:8850}"
+      COLLECTOR_TOKEN: "${COLLECTOR_TOKEN}"
 
   volt:
     image: ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG:-latest}
@@ -51,10 +51,12 @@ services:
       INFLUXDB_TOKEN: "${VOLT_INFLUXDB_TOKEN}"
       INFLUXDB_ORG: "ahara"
       INFLUXDB_BUCKET: "voltage-data"
-      COLLECTION_INTERVAL: "1"
-      KASA_USERNAME: "${KASA_USERNAME}"
-      KASA_PASSWORD: "${KASA_PASSWORD}"
-      KASA_DISCOVERY_TARGET: "${IOT_DISCOVERY_ADDRESS:-192.168.65.255}"
+      # Plugs live on the home LAN behind the collector appliance, which
+      # holds the Kasa credentials and speaks KLAP; this collector drains
+      # its kasa stream (ahara-collector ADR-0006/0007) and owns the
+      # voltage_monitoring schema.
+      COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.65.10:8850}"
+      COLLECTOR_TOKEN: "${COLLECTOR_TOKEN}"
 
   volt-event:
     image: ghcr.io/chris-arsenault/house-sensors/management/volt-event:${IMAGE_TAG:-latest}

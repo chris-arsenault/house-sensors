@@ -1,6 +1,6 @@
 # Architecture
 
-House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker Compose stack for TrueNAS. The TrueNAS stack runs two Python polling collectors, three Python sensor data jobs, and one nginx-hosted management UI.
+House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker Compose stack for TrueNAS. The TrueNAS stack runs two Python drain collectors, three Python sensor data jobs, and one nginx-hosted management UI. Device-facing work — discovery, credentials, polling — lives on the ahara-collector appliance on the home LAN; this stack owns the data schema and everything downstream (ahara-collector ADR-0006).
 
 ## Components
 
@@ -17,15 +17,15 @@ House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker C
 
 `firmware/atoms3u-env3/main.py` runs on M5 AtomS3U ENV-III devices. It connects to Wi-Fi, serves Basic Auth protected HTTP endpoints, responds to UDP discovery on port `12343`, and persists tag key/value pairs on the device.
 
-The firmware exposes `/sensors` with temperature, humidity, pressure, timestamps, and tags. The `environment-sensors` collector discovers these devices and writes their readings to InfluxDB.
+The firmware exposes `/sensors` with temperature, humidity, pressure, timestamps, and tags. The ahara-collector appliance discovers and polls these devices with the shared device credentials; the `environment-sensors` collector consumes the resulting readings.
 
 ## Data Flow
 
-`environment-sensors` sends UDP discovery packets to `DISCOVERY_ADDRESS`, validates `/sensors` responses, converts readings to Influx line protocol, and writes to the `environment-data` bucket.
+The devices sit on the home LAN behind the ahara-collector appliance, which discovers them, holds their credentials, polls them, and spools one device-native JSON reading envelope per reading — one bounded stream per module. Each collector here drains its own stream over the appliance's authenticated API (`GET /readings/next?module=<name>`, then `POST /readings/ack` after every write lands; unacked batches are re-served, and duplicate writes are idempotent). The envelope format and drain contract are specified in ahara-collector `docs/integration.md`.
 
-`volt` discovers authenticated Kasa devices with energy-monitoring support at `KASA_DISCOVERY_TARGET`, reads voltage/current/power/total energy data, and writes points to the `voltage-data` bucket.
+`environment-sensors` drains the `envSensors` stream, maps each envelope to the `environment` measurement — field names, firmware key aliases, and the corrected-sample audit field — and writes to the `environment-data` bucket.
 
-Both collectors run on the server subnet while the devices sit on the home LAN, so discovery is addressed at the home LAN's broadcast address (`IOT_DISCOVERY_ADDRESS` in the stack environment, default `192.168.65.255`). The VP2440 gateway forwards those directed broadcasts and the answers on declared flows; see ahara-vpn ADR-0011.
+`volt` drains the `kasa` stream, converts the vendor-unit energy payload (mW, Wh, mV, mA) to `voltage_monitoring` fields in W, kWh, V, and A, and writes points to the `voltage-data` bucket.
 
 `volt-event` serves a static event logger UI. Browser requests post line protocol to `/api/influx/write`; nginx proxies those writes to InfluxDB with the token supplied by Komodo.
 
@@ -48,14 +48,13 @@ Project Terraform owns the raw archive S3 bucket and the least-privilege TrueNAS
 | Variable | Service | SSM path |
 | ---- | ---- | ---- |
 | `ENV_SENSOR_INFLUX_TOKEN` | `environment-sensors` | `/ahara/observability/influxdb-admin-token` |
-| `ENV_SENSOR_DEVICE_USER` | `environment-sensors` | `/ahara/house-sensors/environment-sensors/device-user` |
-| `ENV_SENSOR_DEVICE_PASS` | `environment-sensors` | `/ahara/house-sensors/environment-sensors/device-pass` |
 | `VOLT_INFLUXDB_TOKEN` | `volt` | `/ahara/observability/influxdb-admin-token` |
-| `KASA_USERNAME` | `volt` | `/ahara/house-sensors/volt/kasa-username` |
-| `KASA_PASSWORD` | `volt` | `/ahara/house-sensors/volt/kasa-password` |
+| `COLLECTOR_TOKEN` | `environment-sensors`, `volt` | `/ahara/house-sensors/collector/api-token` |
 | `VOLT_EVENT_INFLUX_TOKEN` | `volt-event` | `/ahara/observability/influxdb-admin-token` |
 | `DOWNSAMPLER_INFLUX_TOKEN` | `downsampling-medium`, `downsampling-long`, `raw-archive-cleanup` | `/ahara/observability/influxdb-admin-token` |
 | `RAW_ARCHIVE_S3_BUCKET` | `raw-archive-cleanup` | `/ahara/house-sensors/raw-archive/s3-bucket` |
+
+The device credential parameters (`/ahara/house-sensors/environment-sensors/device-*`, `/ahara/house-sensors/volt/kasa-*`) stay in SSM but are no longer stack environment: the ahara-collector appliance renders them into its host credentials file at install.
 
 `raw-archive-cleanup` also receives `AWS_RA_RAW_ARCHIVE_*` environment variables from the shared Ahara TrueNAS deploy workflow. Those values are generated at deploy time from the `truenas_roles_anywhere.raw-archive` entry in `platform.yml`, not from `secret-paths.yml`.
 

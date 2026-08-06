@@ -26,7 +26,7 @@ COPY config.yaml ./
 
 # Add healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import kasa, influxdb_client, prometheus_client; print('All imports OK')" || exit 1
+    CMD python -c "import requests, influxdb_client; print('All imports OK')" || exit 1
 
 # Run the collector
 CMD ["python", "-u", "voltage_collector.py"]

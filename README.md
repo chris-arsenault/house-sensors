@@ -16,8 +16,8 @@ make ci
 | Component | Purpose |
 | ---- | ---- |
 | `firmware/atoms3u-env3` | MicroPython firmware for M5 AtomS3U ENV-III sensor devices. |
-| `environment-sensors` | Discovers HTTP environment sensors and writes temperature, humidity, and pressure readings to InfluxDB. |
-| `volt` | Discovers Kasa energy-monitoring plugs and writes voltage, current, power, and total energy readings to InfluxDB. |
+| `environment-sensors` | Drains the ahara-collector `envSensors` stream and writes temperature, humidity, and pressure readings to InfluxDB. |
+| `volt` | Drains the ahara-collector `kasa` stream and writes voltage, current, power, and total energy readings to InfluxDB. |
 | `volt-event` | Nginx-hosted house event logger UI that proxies event writes to InfluxDB. |
 | `downsampling-medium` | Raw-to-medium rollup job that reads environment and voltage buckets, emits per-minute aggregates, and preserves anomalous seconds. |
 | `downsampling-long` | Medium-to-long rollup job that emits hourly aggregates and preserves anomalous minute/second detail. |

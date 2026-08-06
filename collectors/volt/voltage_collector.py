@@ -1,18 +1,33 @@
 #!/usr/bin/env python3
 """
-Voltage monitoring collector for Kasa smart plugs
-Supports both InfluxDB and Prometheus backends
+Voltage reading drain -> InfluxDB.
+
+Drains the `kasa` stream of the ahara-collector appliance (the host that
+discovers and polls the KP125M plugs over KLAP on the home LAN) and maps
+each device-native reading envelope to the `voltage_monitoring`
+measurement. This collector owns the schema: field names and the
+vendor-unit conversions (mW -> W, Wh -> kWh, mV -> V, mA -> A) live here
+(ahara-collector ADR-0006); the appliance ships the KLAP payload verbatim.
+
+Envelope contract (ahara-collector docs/integration.md):
+  {"module": "kasa",
+   "device": {"ip": ..., "name": ..., "model": ..., "deviceId": ...},
+   "timestampNs": <poll time>,
+   "values": {<the get_energy_usage result, verbatim>}}
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import os
+import signal
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Dict, Optional
 
+import requests
 import yaml
 from app_telemetry import telemetry_from_env
 
@@ -27,51 +42,38 @@ except ImportError as e:
     INFLUX_AVAILABLE = False
     print(f"InfluxDB client not available: {e}")
 
-# Prometheus imports
-try:
-    from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
-
-    PROMETHEUS_AVAILABLE = True
-    print("Prometheus client loaded successfully")
-except ImportError as e:
-    PROMETHEUS_AVAILABLE = False
-    print(f"Prometheus client not available: {e}")
-
-# Kasa imports
-try:
-    from kasa import Device, Discover
-    from kasa.credentials import Credentials
-
-    KASA_AVAILABLE = True
-    print("Python-kasa loaded successfully")
-except ImportError as e:
-    KASA_AVAILABLE = False
-    print(f"Python-kasa not available: {e}")
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 telemetry = telemetry_from_env("house-sensors.volt")
+
+shutdown_event = threading.Event()
+
+
+def _signal_handler(sig, frame):
+    logger.info("Received shutdown signal. Stopping...")
+    shutdown_event.set()
+
+
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
 
 
 class VoltageCollector:
     def __init__(self, config_path: str = "/app/config.yaml"):
         self.config = self.load_config(config_path)
-        self.devices: Dict[str, Device] = {}
         self.influx_client: Optional[InfluxDBClient] = None
-        self.prometheus_registry: Optional[CollectorRegistry] = None
-        self.voltage_gauge: Optional[Gauge] = None
-        self.current_gauge: Optional[Gauge] = None
-        self.power_gauge: Optional[Gauge] = None
 
         self.setup_backends()
 
     def load_config(self, config_path: str = "/app/config.yaml") -> dict:
         """Load configuration from YAML file or environment variables"""
         default_config = {
-            "collection_interval": int(os.getenv("COLLECTION_INTERVAL", "1")),
-            "kasa_auth": {
-                "username": os.getenv("KASA_USERNAME", ""),
-                "password": os.getenv("KASA_PASSWORD", ""),
+            "drain_interval": float(os.getenv("DRAIN_INTERVAL_SECONDS", "10")),
+            "drain_timeout": float(os.getenv("DRAIN_TIMEOUT_SECONDS", "10")),
+            "collector": {
+                "url": os.getenv("COLLECTOR_URL", "http://192.168.65.10:8850"),
+                "token": os.getenv("COLLECTOR_TOKEN", ""),
+                "module": os.getenv("COLLECTOR_MODULE", "kasa"),
             },
             "influxdb": {
                 "url": os.getenv("INFLUXDB_URL", "http://localhost:8086"),
@@ -79,17 +81,6 @@ class VoltageCollector:
                 "org": os.getenv("INFLUXDB_ORG", "voltage-monitoring"),
                 "bucket": os.getenv("INFLUXDB_BUCKET", "voltage-data"),
             },
-            "prometheus": {
-                "pushgateway": os.getenv("PROMETHEUS_PUSHGATEWAY", "http://localhost:9091"),
-                "job_name": "voltage-monitoring",
-            },
-            "devices": {
-                # Will be auto-discovered if empty
-            },
-            # Devices live on the home LAN while this collector runs on the
-            # server subnet, so discovery is addressed at the home LAN's
-            # broadcast rather than the collector's own.
-            "discovery_target": os.getenv("KASA_DISCOVERY_TARGET", "255.255.255.255"),
         }
 
         # Try to load from file, but don't fail if file doesn't exist
@@ -113,22 +104,21 @@ class VoltageCollector:
 
         # Log the configuration (without sensitive data)
         config_summary = {
-            "collection_interval": default_config["collection_interval"],
-            "kasa_username_set": bool(default_config["kasa_auth"]["username"]),
-            "kasa_password_set": bool(default_config["kasa_auth"]["password"]),
+            "drain_interval": default_config["drain_interval"],
+            "collector_url": default_config["collector"]["url"],
+            "collector_module": default_config["collector"]["module"],
+            "collector_token_set": bool(default_config["collector"]["token"]),
             "influxdb_url": default_config["influxdb"]["url"],
             "influxdb_org": default_config["influxdb"]["org"],
             "influxdb_bucket": default_config["influxdb"]["bucket"],
             "influxdb_token_set": bool(default_config["influxdb"]["token"]),
-            "prometheus_pushgateway": default_config["prometheus"]["pushgateway"],
         }
         logger.info(f"Configuration: {config_summary}")
 
         return default_config
 
     def setup_backends(self):
-        """Initialize InfluxDB and Prometheus clients"""
-        # InfluxDB setup
+        """Initialize the InfluxDB client"""
         influx_config = self.config.get("influxdb", {})
         influx_url = influx_config.get("url", "http://localhost:8086")
         influx_token = influx_config.get("token", "")
@@ -160,178 +150,56 @@ class VoltageCollector:
             logger.warning("InfluxDB client library not available - install influxdb-client")
         elif not influx_token:
             logger.warning(f"InfluxDB token not configured - skipping InfluxDB setup. URL: {influx_url}")
-        else:
-            logger.warning("InfluxDB setup skipped for unknown reason")
 
-        # Check if at least one backend is available
-        if not self.influx_client and not self.prometheus_registry:
-            logger.warning("No data storage backends available - data will only be logged to console")
+        if not self.influx_client:
+            logger.warning("No data storage backend available - data will only be logged to console")
 
-    async def discover_devices(self):
-        """Discover Kasa devices on the network using new API"""
-        started_at = time.monotonic()
-        if not KASA_AVAILABLE:
-            logger.error("Python-kasa not available, cannot discover devices")
-            telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "dependency_missing"})
-            return
+    @staticmethod
+    def envelope_to_data(envelope: Dict) -> Optional[dict]:
+        """Map one kasa reading envelope to the voltage_monitoring shape.
 
-        # Get authentication credentials
-        auth_config = self.config.get("kasa_auth", {})
-        username = auth_config.get("username", "")
-        password = auth_config.get("password", "")
-
-        # Create credentials if provided
-        credentials = None
-        if username and password:
-            try:
-                credentials = Credentials(username=username, password=password)
-                logger.info("Using authentication for configured Kasa account")
-            except Exception as e:
-                logger.warning(f"Could not create credentials: {e}")
-                return
-        else:
-            logger.info("No authentication credentials provided")
-            telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "missing_credentials"})
-            return
-
-        # Auto-discovery - use all found devices
-        target = self.config.get("discovery_target", "255.255.255.255")
-        logger.info("Attempting automatic device discovery with authentication (target=%s)...", target)
-        try:
-            found_devices = await Discover.discover(target=target, timeout=10, credentials=credentials)
-            logger.info(f"Auto-discovery found {len(found_devices)} authenticated devices")
-            telemetry.record("house_sensors.discovered_devices", len(found_devices), {"operation.type": "background"})
-
-            for ip, device in found_devices.items():
-                if device:
-                    try:
-                        await device.update()
-
-                        # Check if device has energy monitoring
-                        has_emeter = (
-                            hasattr(device, "has_emeter") and device.has_emeter
-                            or hasattr(device, "modules") and "energy" in device.modules
-                            or hasattr(device, "emeter")
-                            or "emeter" in str(type(device)).lower()
-                        )
-
-                        if has_emeter:
-                            self.devices[ip] = device
-                            device_name = device.alias if hasattr(device, "alias") else f"device_{ip}"
-                            logger.info(f"Auto-discovered energy monitoring device: {device_name} ({ip})")
-                        else:
-                            device_name = device.alias if hasattr(device, "alias") else f"device_{ip}"
-                            logger.info(f"Skipped non-energy monitoring device: {device_name} ({ip})")
-                    except Exception as e:
-                        logger.error(f"Could not update device at {ip}: {e}")
-
-        except Exception as e:
-            logger.error(f"Auto-discovery with authentication failed: {e}")
-            logger.info("Make sure your username/password are correct")
-            telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "error"})
-            telemetry.record("house_sensors.discovery_duration_ms", (time.monotonic() - started_at) * 1000, {"operation.type": "background"})
-            return
-
-        telemetry.count("house_sensors.discovery_runs", attributes={"operation.type": "background", "outcome": "success"})
-        telemetry.record("house_sensors.discovery_duration_ms", (time.monotonic() - started_at) * 1000, {"operation.type": "background"})
-        telemetry.record("house_sensors.monitored_devices", len(self.devices), {"operation.type": "background"})
-
-    async def collect_device_data(self, ip: str, device: Device) -> Optional[dict]:
-        """Collect voltage/power data from a single device using new API"""
-        try:
-            await device.update()
-
-            # Try different methods to get energy data with new API
-            emeter_data = None
-
-            # Method 1: Check for emeter module (new API)
-            if hasattr(device, "modules") and "energy" in device.modules:
-                energy_module = device.modules["energy"]
-                if hasattr(energy_module, "emeter_realtime"):
-                    emeter_data = energy_module.emeter_realtime
-                elif hasattr(energy_module, "get_realtime"):
-                    emeter_data = energy_module.get_realtime()
-
-            # Method 2: Direct emeter access (legacy support)
-            elif hasattr(device, "emeter_realtime"):
-                emeter_data = device.emeter_realtime
-
-            # Method 3: Current consumption method
-            elif hasattr(device, "current_consumption"):
-                emeter_data = device.current_consumption()
-
-            # Method 4: Try emeter property
-            elif hasattr(device, "emeter"):
-                emeter = device.emeter
-                if hasattr(emeter, "get_realtime"):
-                    emeter_data = await emeter.get_realtime()
-                elif hasattr(emeter, "realtime"):
-                    emeter_data = emeter.realtime
-
-            if not emeter_data:
-                logger.warning(f"No energy data available for {device.alias if hasattr(device, 'alias') else ip}")
-                telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "empty"})
-                return None
-
-            # Handle different data formats
-            voltage = 0.0
-            current = 0.0
-            power = 0.0
-            total = 0.0
-
-            # Extract voltage (handle both mV and V formats)
-            if "voltage_mv" in emeter_data:
-                voltage = emeter_data["voltage_mv"] / 1000.0
-            elif "voltage" in emeter_data:
-                voltage = float(emeter_data["voltage"])
-
-            # Extract current (handle both mA and A formats)
-            if "current_ma" in emeter_data:
-                current = emeter_data["current_ma"] / 1000.0
-            elif "current" in emeter_data:
-                current = float(emeter_data["current"])
-
-            # Extract power (handle both mW and W formats)
-            if "power_mw" in emeter_data:
-                power = emeter_data["power_mw"] / 1000.0
-            elif "power" in emeter_data:
-                power = float(emeter_data["power"])
-
-            # Extract total energy (handle both Wh and kWh formats)
-            if "total_wh" in emeter_data:
-                total = emeter_data["total_wh"] / 1000.0
-            elif "total" in emeter_data:
-                total = float(emeter_data["total"])
-
-            device_name = device.alias if hasattr(device, "alias") else f"device_{ip.replace('.', '_')}"
-            device_location = "unknown"
-            if hasattr(device, "location") and device.location:
-                device_location = device.location
-
-            data = {
-                "timestamp": datetime.now(UTC),
-                "device_name": device_name,
-                "device_ip": ip,
-                "location": device_location,
-                "voltage": voltage,
-                "current": current,
-                "power": power,
-                "total": total,
-            }
-
-            telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "success"})
-            return data
-
-        except Exception as e:
-            device_name = device.alias if hasattr(device, "alias") else ip
-            logger.error(f"Error collecting data from {device_name} ({ip}): {e}")
-            telemetry.count("house_sensors.poll_results", attributes={"operation.type": "polling", "outcome": "error"})
+        The values object is the device's get_energy_usage result verbatim
+        (current_power in mW, today_energy in Wh, voltage_mv, current_ma);
+        the unit conversions to W/kWh/V/A happen here.
+        """
+        device = envelope.get("device") or {}
+        values = envelope.get("values") or {}
+        timestamp_ns = envelope.get("timestampNs")
+        if not isinstance(device, dict) or not isinstance(values, dict):
+            return None
+        if not isinstance(timestamp_ns, int):
+            return None
+        ip = device.get("ip")
+        if not ip:
             return None
 
-    def write_to_influxdb(self, data: dict):
+        def milli(key: str) -> Optional[float]:
+            value = values.get(key)
+            return value / 1000.0 if isinstance(value, (int, float)) else None
+
+        voltage = milli("voltage_mv")
+        current = milli("current_ma")
+        power = milli("current_power")
+        total = milli("today_energy")
+
+        if voltage is None and current is None and power is None and total is None:
+            return None
+
+        return {
+            "timestamp": datetime.fromtimestamp(timestamp_ns / 1_000_000_000, UTC),
+            "device_name": device.get("name") or device.get("deviceId") or ip,
+            "device_ip": ip,
+            "location": "unknown",
+            "voltage": voltage if voltage is not None else 0.0,
+            "current": current if current is not None else 0.0,
+            "power": power if power is not None else 0.0,
+            "total": total if total is not None else 0.0,
+        }
+
+    def write_to_influxdb(self, data: dict) -> bool:
         """Write data point to InfluxDB"""
         if not self.influx_client:
-            return
+            return False
 
         try:
             influx_config = self.config.get("influxdb", {})
@@ -351,91 +219,121 @@ class VoltageCollector:
 
             write_api = self.influx_client.write_api(write_options=SYNCHRONOUS)
             write_api.write(bucket=bucket, record=point)
-            telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "polling", "outcome": "success"})
+            telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "drain", "outcome": "success"})
+            return True
 
         except Exception as e:
             logger.error(f"Error writing to InfluxDB: {e}")
-            telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "polling", "outcome": "error"})
+            telemetry.count("house_sensors.influx_writes", attributes={"operation.type": "drain", "outcome": "error"})
+            return False
 
-    def write_to_prometheus(self, data: dict):
-        """Update Prometheus metrics"""
-        if not self.prometheus_registry:
-            return
+    def drain_once(self, session: requests.Session) -> bool:
+        """One drain cycle. Returns True when a batch was fully processed
+        and acked (the caller retries immediately to clear a backlog)."""
+        collector = self.config["collector"]
+        base = collector["url"].rstrip("/")
+        timeout = self.config["drain_timeout"]
+        try:
+            r = session.get(
+                f"{base}/readings/next",
+                params={"module": collector["module"]},
+                timeout=timeout,
+            )
+        except Exception as e:
+            logger.warning(f"Collector fetch failed: {e}")
+            telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "error"})
+            return False
+        if r.status_code == 204:
+            telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "empty"})
+            return False
+        if r.status_code != 200:
+            logger.warning(f"Collector fetch failed: HTTP {r.status_code} {r.text[:200]}")
+            telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "error"})
+            return False
 
         try:
-            prometheus_config = self.config.get("prometheus", {})
-            pushgateway_url = prometheus_config.get("pushgateway", "http://localhost:9091")
-            job_name = prometheus_config.get("job_name", "voltage-monitoring")
-
-            labels = {
-                "device_name": data["device_name"],
-                "device_ip": data["device_ip"],
-                "location": data["location"],
-            }
-
-            self.voltage_gauge.labels(**labels).set(data["voltage"])
-            self.current_gauge.labels(**labels).set(data["current"])
-            self.power_gauge.labels(**labels).set(data["power"])
-
-            # Push to gateway
-            push_to_gateway(pushgateway_url, job=job_name, registry=self.prometheus_registry)
-
+            doc = r.json()
+            batch_id = doc["batchId"]
+            raw_lines = doc.get("lines", "").splitlines()
         except Exception as e:
-            logger.error(f"Error writing to Prometheus: {e}")
+            logger.warning(f"Collector batch unparseable: {e}")
+            telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "error"})
+            return False
 
-    async def collection_loop(self):
-        """Main collection loop"""
-        logger.info("Starting voltage collection loop...")
-
-        while True:
+        written = 0
+        skipped = 0
+        for raw in raw_lines:
+            raw = raw.strip()
+            if not raw:
+                continue
             try:
-                started_at = time.monotonic()
-                # Collect data from all devices
-                tasks = []
-                for ip, device in self.devices.items():
-                    tasks.append(self.collect_device_data(ip, device))
+                envelope = json.loads(raw)
+            except Exception:
+                skipped += 1
+                continue
+            data = self.envelope_to_data(envelope) if isinstance(envelope, dict) else None
+            if data is None:
+                skipped += 1
+                continue
+            # Write before ack: an unacked batch is re-served, and
+            # duplicate writes are idempotent per measurement/tags/timestamp.
+            if not self.write_to_influxdb(data):
+                telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "write_failed"})
+                return False
+            logger.info(f"Drained: {data['device_name']} - {data['voltage']:.1f}V, {data['power']:.1f}W")
+            written += 1
 
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+        if skipped:
+            logger.warning(f"Skipped {skipped} unmappable envelope(s) in batch {batch_id}")
+            telemetry.record("house_sensors.drain_skipped_envelopes", skipped, {"operation.type": "drain"})
 
-                # Write successful results to backends
-                for result in results:
-                    if isinstance(result, dict):
-                        logger.info(f"Collected: {result['device_name']} - {result['voltage']:.1f}V, {result['power']:.1f}W")
+        try:
+            ack = session.post(
+                f"{base}/readings/ack",
+                json={"module": collector["module"], "batchId": batch_id},
+                timeout=timeout,
+            )
+            if ack.status_code != 200:
+                logger.warning(f"Ack failed: HTTP {ack.status_code}")
+                telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "ack_failed"})
+                return False
+        except Exception as e:
+            logger.warning(f"Ack failed: {e}")
+            telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "ack_failed"})
+            return False
 
-                        # Write to backends
-                        self.write_to_influxdb(result)
-                        self.write_to_prometheus(result)
+        telemetry.count("house_sensors.drain_batches", attributes={"operation.type": "drain", "outcome": "success"})
+        telemetry.record("house_sensors.drain_batch_lines", written, {"operation.type": "drain"})
+        return True
 
-                telemetry.record("house_sensors.collection_loop_duration_ms", (time.monotonic() - started_at) * 1000, {"operation.type": "polling"})
-                successful_results = len([result for result in results if isinstance(result, dict)])
-                telemetry.record("house_sensors.collection_loop_results", successful_results, {"operation.type": "polling"})
-                telemetry.count("house_sensors.collection_loops", attributes={"operation.type": "polling", "outcome": "success"})
-                await asyncio.sleep(self.config["collection_interval"])
-
-            except Exception as e:
-                logger.error(f"Error in collection loop: {e}")
-                telemetry.count("house_sensors.collection_loops", attributes={"operation.type": "polling", "outcome": "error"})
-                await asyncio.sleep(5)  # Wait before retrying
-
-    async def run(self):
+    def run(self):
         """Main run method"""
-        logger.info("Starting Voltage Collector...")
+        logger.info("Starting Voltage Collector drain...")
+        collector = self.config["collector"]
+        if not collector["token"]:
+            logger.warning("COLLECTOR_TOKEN not set; the collector will refuse the drain.")
 
-        # Discover devices
-        await self.discover_devices()
+        session = requests.Session()
+        session.headers["Authorization"] = f"Bearer {collector['token']}"
 
-        if not self.devices:
-            logger.error("No energy monitoring devices found. Exiting.")
-            return
+        while not shutdown_event.is_set():
+            started_at = time.monotonic()
+            processed = self.drain_once(session)
+            telemetry.record(
+                "house_sensors.collection_loop_duration_ms",
+                (time.monotonic() - started_at) * 1000,
+                {"operation.type": "drain"},
+            )
+            if not processed:
+                shutdown_event.wait(self.config["drain_interval"])
 
-        # Start collection loop
-        await self.collection_loop()
+        logger.info("Shutting down...")
 
 
-async def main():
+def main():
     collector = VoltageCollector()
-    await collector.run()
+    collector.run()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
