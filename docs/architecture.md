@@ -6,8 +6,8 @@ House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker C
 
 | Service | Source | Image | Runtime network |
 | ---- | ---- | ---- | ---- |
-| `environment-sensors` | `collectors/environment-sensors/` | `ghcr.io/chris-arsenault/house-sensors/collectors/environment-sensors:${IMAGE_TAG}` | `host` |
-| `volt` | `collectors/volt/` | `ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG}` | `host` |
+| `environment-sensors` | `collectors/environment-sensors/` | `ghcr.io/chris-arsenault/house-sensors/collectors/environment-sensors:${IMAGE_TAG}` | Default bridge network |
+| `volt` | `collectors/volt/` | `ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG}` | Default bridge network |
 | `volt-event` | `management/volt-event/` | `ghcr.io/chris-arsenault/house-sensors/management/volt-event:${IMAGE_TAG}` | Published on `192.168.66.3:8085` |
 | `downsampling-medium` | `jobs/downsampling/` | `ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG}` | Default bridge network |
 | `downsampling-long` | `jobs/downsampling/` | `ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG}` | Default bridge network |

@@ -20,7 +20,6 @@ services:
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
-    network_mode: host
     environment:
       <<: *house-sensors-otel
       OTEL_SERVICE_NAME: "house-sensors.environment-sensors"
@@ -43,7 +42,6 @@ services:
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
-    network_mode: host
     environment:
       <<: *house-sensors-otel
       OTEL_SERVICE_NAME: "house-sensors.volt"
