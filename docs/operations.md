@@ -103,7 +103,7 @@ The `raw-archive-cleanup` service archives only raw buckets: `environment-data` 
 
 The archive container starts through `truenas-roles-anywhere-bootstrap`. The helper stores its private key and certificate in the `raw-archive-aws-identity` volume, writes an AWS SDK `credential_process` profile, and then runs the Python job with temporary AWS credentials.
 
-The first start on a fresh volume exits with `Enrollment for … is waiting for approval`. Approve the request in the trust appliance's portal at `https://trust.local.ahara.io:8443/`, then restart the container. This recurs only if the volume is lost, since the helper afterwards renews using the certificate it holds.
+A fresh volume enrolls on its own, provided `spiffe://ahara/house-sensors/raw-archive` is declared in `identity.allowedWorkloads` on the trust appliance. If it is not, the container exits saying so and no certificate is issued.
 
 Current deployment is in archive-validation mode: `RAW_ARCHIVE_DELETE_ENABLED=false`. The job uploads raw windows to S3 and advances archive watermarks, but it does not call the InfluxDB delete API or advance raw/medium delete watermarks. Turn deletion on only after the S3 archive contents have been validated.
 
