@@ -76,6 +76,9 @@ module "truenas_raw_archive_role" {
   prefix      = local.prefix
   name        = "raw-archive"
   policy_json = data.aws_iam_policy_document.raw_archive_runtime.json
+  permissions_boundary_arn = (
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/pb-${local.prefix}-truenas-workload"
+  )
 }
 
 resource "aws_ssm_parameter" "raw_archive_s3_bucket" {

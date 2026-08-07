@@ -4,6 +4,6 @@ output "raw_archive_bucket" {
 }
 
 output "raw_archive_workload_role" {
-  description = "IAM Roles Anywhere workload role used by the TrueNAS raw archive job."
-  value       = module.truenas_raw_archive_role.role_name
+  description = "IAM Roles Anywhere workload role ARN used by the TrueNAS raw archive job."
+  value       = module.truenas_raw_archive_role.role_arn
 }

@@ -101,9 +101,13 @@ Both jobs learn thresholds from observed data and store thresholds, coverage bou
 
 The `raw-archive-cleanup` service archives only raw buckets: `environment-data` and `voltage-data`. It writes gzipped Influx line-protocol objects under `s3://${RAW_ARCHIVE_S3_BUCKET}/house-sensors/raw/...`. The S3 bucket is Terraform-managed; the runtime container does not create or configure it.
 
-The archive container starts through `truenas-roles-anywhere-bootstrap`. The helper stores its private key and certificate in the `raw-archive-aws-identity` volume, writes an AWS SDK `credential_process` profile, and then runs the Python job with temporary AWS credentials.
+The archive container starts through `truenas-roles-anywhere-bootstrap`. The helper stores its private key, pinned authority, and certificate in the `raw-archive-aws-identity` volume, writes an AWS SDK `credential_process` profile, and then runs the Python job with temporary AWS credentials. A background pass checks daily and renews before expiry, so the long-running job does not retain a boot-time-only identity.
 
 A fresh volume enrolls on its own, provided `spiffe://ahara/house-sensors/raw-archive` is declared in `identity.allowedWorkloads` on the trust appliance. If it is not, the container exits saying so and no certificate is issued.
+
+If the trust appliance is rebuilt with a new CA, stop this container and reset
+the `raw-archive-aws-identity` volume before redeploying. The helper deliberately
+refuses to replace its pinned authority during an ordinary restart.
 
 Current deployment is in archive-validation mode: `RAW_ARCHIVE_DELETE_ENABLED=false`. The job uploads raw windows to S3 and advances archive watermarks, but it does not call the InfluxDB delete API or advance raw/medium delete watermarks. Turn deletion on only after the S3 archive contents have been validated.
 
