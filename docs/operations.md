@@ -58,7 +58,7 @@ Committed secret references live in [secret-paths.yml](../secret-paths.yml). Kom
 
 Use `.env.example` only for local Compose validation. Keep real tokens, passwords, and usernames in SSM.
 
-The stack currently uses `/ahara/observability/influxdb-admin-token` for InfluxDB writes and deletes. The raw archive S3 bucket name is created by project Terraform and resolved from `/ahara/house-sensors/raw-archive/s3-bucket`. S3 credentials are obtained through Ahara TrueNAS IAM Roles Anywhere at container boot, not through SSM-stored AWS access keys. The Grafana, OTLP, and InfluxDB admin password observability parameters are not bound because no house-sensors service reads them.
+The stack currently uses `/ahara/observability/influxdb-admin-token` for InfluxDB writes and deletes. The raw archive S3 bucket name is created by project Terraform and resolved from `/ahara/house-sensors/raw-archive/s3-bucket`. S3 credentials are obtained through IAM Roles Anywhere at container boot by presenting a certificate from the trust appliance, not through SSM-stored AWS access keys. The Grafana, OTLP, and InfluxDB admin password observability parameters are not bound because no house-sensors service reads them.
 
 Firmware credentials live in device-local `secrets.py` files copied to the board. Keep those files out of git and use `firmware/atoms3u-env3/secrets.example.py` as the template.
 
@@ -102,6 +102,8 @@ Both jobs learn thresholds from observed data and store thresholds, coverage bou
 The `raw-archive-cleanup` service archives only raw buckets: `environment-data` and `voltage-data`. It writes gzipped Influx line-protocol objects under `s3://${RAW_ARCHIVE_S3_BUCKET}/house-sensors/raw/...`. The S3 bucket is Terraform-managed; the runtime container does not create or configure it.
 
 The archive container starts through `truenas-roles-anywhere-bootstrap`. The helper stores its private key and certificate in the `raw-archive-aws-identity` volume, writes an AWS SDK `credential_process` profile, and then runs the Python job with temporary AWS credentials.
+
+The first start on a fresh volume exits with `Enrollment for … is waiting for approval`. Approve the request in the trust appliance's portal at `https://trust.local.ahara.io:8443/`, then restart the container. This recurs only if the volume is lost, since the helper afterwards renews using the certificate it holds.
 
 Current deployment is in archive-validation mode: `RAW_ARCHIVE_DELETE_ENABLED=false`. The job uploads raw windows to S3 and advances archive watermarks, but it does not call the InfluxDB delete API or advance raw/medium delete watermarks. Turn deletion on only after the S3 archive contents have been validated.
 

@@ -43,7 +43,7 @@ Runtime configuration is supplied through Compose environment variables. Secret 
 
 Firmware device credentials are supplied through an ignored `secrets.py` copied to each device. The committed `secrets.example.py` shows the expected fields.
 
-Project Terraform owns the raw archive S3 bucket and the least-privilege TrueNAS IAM Roles Anywhere workload role. Komodo resolves the bucket name from SSM and injects the short-lived Roles Anywhere enrollment values declared in `platform.yml`; no long-lived AWS access keys are passed to the container.
+Project Terraform owns the raw archive S3 bucket and the least-privilege IAM role the archive job assumes. Komodo resolves the bucket name from SSM and injects the Roles Anywhere discovery values declared in `platform.yml`; no AWS credential of any kind is passed to the container, which instead presents a certificate issued by the trust appliance on the LAN.
 
 | Variable | Service | SSM path |
 | ---- | ---- | ---- |
@@ -56,7 +56,7 @@ Project Terraform owns the raw archive S3 bucket and the least-privilege TrueNAS
 
 The device credential parameters (`/ahara/house-sensors/environment-sensors/device-*`, `/ahara/house-sensors/volt/kasa-*`) stay in SSM but are no longer stack environment: the ahara-collector appliance renders them into its host credentials file at install.
 
-`raw-archive-cleanup` also receives `AWS_RA_RAW_ARCHIVE_*` environment variables from the shared Ahara TrueNAS deploy workflow. Those values are generated at deploy time from the `truenas_roles_anywhere.raw-archive` entry in `platform.yml`, not from `secret-paths.yml`.
+`raw-archive-cleanup` also receives `AWS_RA_RAW_ARCHIVE_*` environment variables from the shared Ahara TrueNAS deploy workflow. Those values come from the `truenas_roles_anywhere.raw-archive` entry in `platform.yml`, not from `secret-paths.yml`. They are public identifiers and the trust appliance's address; the container's own key never leaves its volume.
 
 ## Image Packaging
 

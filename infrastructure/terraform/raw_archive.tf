@@ -71,7 +71,7 @@ data "aws_iam_policy_document" "raw_archive_runtime" {
 }
 
 module "truenas_raw_archive_role" {
-  source = "git::https://github.com/chris-arsenault/ahara-infra.git//infrastructure/terraform/modules/truenas-roles-anywhere-workload?ref=main"
+  source = "git::https://github.com/chris-arsenault/ahara-infra.git//infrastructure/terraform/modules/machine-role?ref=main"
 
   prefix      = local.prefix
   name        = "raw-archive"
