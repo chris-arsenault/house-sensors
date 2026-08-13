@@ -6,6 +6,8 @@ All notable user-visible changes are recorded here.
 
 ### Stack
 
+- Both drain collectors now target the ahara-collector appliance at its IoT-LAN
+  address, `192.168.30.2`.
 - Both collectors now drain the ahara-collector appliance instead of
   discovering and polling devices across the routed gateway: each drains
   its own module stream (`envSensors`, `kasa`) of device-native reading

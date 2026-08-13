@@ -71,7 +71,7 @@ class VoltageCollector:
             "drain_interval": float(os.getenv("DRAIN_INTERVAL_SECONDS", "10")),
             "drain_timeout": float(os.getenv("DRAIN_TIMEOUT_SECONDS", "10")),
             "collector": {
-                "url": os.getenv("COLLECTOR_URL", "http://192.168.65.10:8850"),
+                "url": os.getenv("COLLECTOR_URL", "http://192.168.30.2:8850"),
                 "token": os.getenv("COLLECTOR_TOKEN", ""),
                 "module": os.getenv("COLLECTOR_MODULE", "kasa"),
             },

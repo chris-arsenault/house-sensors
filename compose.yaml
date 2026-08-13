@@ -27,11 +27,11 @@ services:
       INFLUX_ORG: "ahara"
       INFLUX_BUCKET: "environment-data"
       INFLUX_TOKEN: "${ENV_SENSOR_INFLUX_TOKEN}"
-      # Sensors live on the home LAN behind the collector appliance, which
+      # Sensors live on the IoT LAN beside the collector appliance, which
       # holds the device credentials and does the discovery and polling;
       # this collector drains its envSensors stream (ahara-collector
       # ADR-0006/0007) and owns the environment schema.
-      COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.65.10:8850}"
+      COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.30.2:8850}"
       COLLECTOR_TOKEN: "${COLLECTOR_TOKEN}"
 
   volt:
@@ -49,11 +49,11 @@ services:
       INFLUXDB_TOKEN: "${VOLT_INFLUXDB_TOKEN}"
       INFLUXDB_ORG: "ahara"
       INFLUXDB_BUCKET: "voltage-data"
-      # Plugs live on the home LAN behind the collector appliance, which
+      # Plugs live on the IoT LAN beside the collector appliance, which
       # holds the Kasa credentials and speaks KLAP; this collector drains
       # its kasa stream (ahara-collector ADR-0006/0007) and owns the
       # voltage_monitoring schema.
-      COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.65.10:8850}"
+      COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.30.2:8850}"
       COLLECTOR_TOKEN: "${COLLECTOR_TOKEN}"
 
   volt-event:

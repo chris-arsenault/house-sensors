@@ -29,7 +29,7 @@ from app_telemetry import telemetry_from_env
 # -----------------------------
 # Environment / configuration
 # -----------------------------
-COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://192.168.65.10:8850")
+COLLECTOR_URL = os.getenv("COLLECTOR_URL", "http://192.168.30.2:8850")
 COLLECTOR_TOKEN = os.getenv("COLLECTOR_TOKEN", "")
 COLLECTOR_MODULE = os.getenv("COLLECTOR_MODULE", "envSensors")
 DRAIN_INTERVAL_SECONDS = float(os.getenv("DRAIN_INTERVAL_SECONDS", "10"))

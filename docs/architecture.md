@@ -1,6 +1,6 @@
 # Architecture
 
-House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker Compose stack for TrueNAS. The TrueNAS stack runs two Python drain collectors, three Python sensor data jobs, and one nginx-hosted management UI. Device-facing work — discovery, credentials, polling — lives on the ahara-collector appliance on the home LAN; this stack owns the data schema and everything downstream (ahara-collector ADR-0006).
+House Sensors includes MicroPython sensor firmware and a Komodo-managed Docker Compose stack for TrueNAS. The TrueNAS stack runs two Python drain collectors, three Python sensor data jobs, and one nginx-hosted management UI. Device-facing work — discovery, credentials, polling — lives on the ahara-collector appliance on the IoT LAN; this stack owns the data schema and everything downstream (ahara-collector ADR-0006).
 
 ## Components
 
@@ -21,7 +21,7 @@ The firmware exposes `/sensors` with temperature, humidity, pressure, timestamps
 
 ## Data Flow
 
-The devices sit on the home LAN behind the ahara-collector appliance, which discovers them, holds their credentials, polls them, and spools one device-native JSON reading envelope per reading — one bounded stream per module. Each collector here drains its own stream over the appliance's authenticated API (`GET /readings/next?module=<name>`, then `POST /readings/ack` after every write lands; unacked batches are re-served, and duplicate writes are idempotent). The envelope format and drain contract are specified in ahara-collector `docs/integration.md`.
+The devices and ahara-collector appliance sit on the IoT LAN. The appliance discovers them, holds their credentials, polls them, and spools one device-native JSON reading envelope per reading — one bounded stream per module. Each collector here drains its own stream over the appliance's authenticated API (`GET /readings/next?module=<name>`, then `POST /readings/ack` after every write lands; unacked batches are re-served, and duplicate writes are idempotent). The envelope format and drain contract are specified in ahara-collector `docs/integration.md`.
 
 `environment-sensors` drains the `envSensors` stream, maps each envelope to the `environment` measurement — field names, firmware key aliases, and the corrected-sample audit field — and writes to the `environment-data` bucket.
 
