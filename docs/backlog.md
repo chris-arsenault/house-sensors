@@ -9,9 +9,7 @@ Planned-but-not-built work. Each item is a positive assertion of future-state be
 
 ## Sensors
 
-- Add explicit device allowlists for collectors that should poll known sensors only.
-- Add collector metrics for discovery counts, write failures, and last successful write time.
-- Add integration tests with mocked sensor and InfluxDB HTTP endpoints.
+- Add drain integration tests with mocked ahara-collector and InfluxDB HTTP endpoints.
 
 ## Management UI
 

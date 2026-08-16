@@ -24,7 +24,8 @@ TrueNAS-hosted environment sensor stack with MicroPython firmware, Python collec
 - Use `/opt/sulion/bin/with-cred -- ...` for commands that require API keys, cloud credentials, service tokens, or other broker-backed secrets.
 - Run `make ci` before committing changes.
 - Build deployed services as self-contained images. Keep runtime bind mounts out of `compose.yaml` unless the service intentionally needs host data.
-- Do not run live collectors unless the user asks; they perform network discovery and poll devices.
+- Do not run live drain collectors unless the user asks; they consume appliance
+  batches and write readings to InfluxDB.
 - Preserve user work in the git tree. Do not use destructive git commands unless the user explicitly requests them.
 
 ## Code map
@@ -38,8 +39,8 @@ TrueNAS-hosted environment sensor stack with MicroPython firmware, Python collec
 | `secret-paths.yml` | SSM parameter paths for Komodo stack environment variables. |
 | `.env.example` | Safe local placeholders for Compose validation. |
 | `firmware/atoms3u-env3/` | MicroPython firmware for M5 AtomS3U ENV-III sensor devices. |
-| `collectors/environment-sensors/` | Python environment sensor collector and image packaging. |
-| `collectors/volt/` | Python Kasa voltage collector and image packaging. |
+| `collectors/environment-sensors/` | Python environment-reading drain and image packaging. |
+| `collectors/volt/` | Python Kasa-reading drain and image packaging. |
 | `jobs/downsampling/` | Lightweight raw-to-medium, medium-to-long, and archive/retention services and image packaging. |
 | `management/volt-event/` | Nginx event logger UI and image packaging. |
 | `tests/` | Unit tests for collector parsing, config, and conversion behavior. |

@@ -6,8 +6,8 @@ Komodo deploys [compose.yaml](../compose.yaml) on TrueNAS. The stack follows the
 
 | Service | Host exposure |
 | ---- | ---- |
-| `environment-sensors` | Host network for UDP discovery and device polling. |
-| `volt` | Host network for Kasa discovery and polling. |
+| `environment-sensors` | Default bridge; drains the collector's `envSensors` stream. |
+| `volt` | Default bridge; drains the collector's `kasa` stream. |
 | `volt-event` | TrueNAS LAN address `192.168.66.3:8085` mapped to container port `80`. |
 | `downsampling-medium` | Looping raw-to-medium background job with a persistent `downsampling-medium-state` Docker volume. |
 | `downsampling-long` | Looping medium-to-long background job with a persistent `downsampling-long-state` Docker volume. |
@@ -16,6 +16,11 @@ Komodo deploys [compose.yaml](../compose.yaml) on TrueNAS. The stack follows the
 Deploys run from the shared Ahara workflow declared by [.github/workflows/ci.yml](../.github/workflows/ci.yml) and [platform.yml](../platform.yml). The workflow builds the component images, pushes them to GHCR under `ghcr.io/chris-arsenault/house-sensors/...`, sets `IMAGE_TAG` to the git SHA, resolves SSM-backed variables, and asks Komodo to deploy.
 
 The stack is intentionally VPN-only. It does not have a `reverse_proxy_routes` entry in `ahara-infra`; reach `volt-event` through the LAN or WireGuard VPN at `http://192.168.66.3:8085/`.
+
+`environment-sensors` and `volt` reach the IoT appliance through
+`COLLECTOR_URL`, which defaults to `http://192.168.30.2:8850`, and authenticate
+with the scoped `COLLECTOR_TOKEN` resolved from SSM. They do not discover or
+poll devices directly from TrueNAS.
 
 ## Grafana Dashboards
 
@@ -33,10 +38,10 @@ http://192.168.66.3:4318
 ```
 
 This is separate from the sensor readings written to InfluxDB. App telemetry
-tracks service health and behavior: discovery cycles, polling results, Influx
-write outcomes, downsampling cycle duration, rows/points processed, archive
-uploads, and delete windows. The local Alloy collector in `ahara-observability`
-routes those metrics to VictoriaMetrics.
+tracks service health and behavior: drain cycles, batch results, Influx write
+outcomes, downsampling cycle duration, rows/points processed, archive uploads,
+and delete windows. The local Alloy collector in `ahara-observability` routes
+those metrics to VictoriaMetrics.
 
 The OTLP endpoint is fronted by the `ahara-observability` ingest gateway, which
 requires a Cognito machine-to-machine (client_credentials) token with the
