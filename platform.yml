@@ -10,6 +10,16 @@ truenas_compose_check_paths:
 truenas_roles_anywhere:
   raw-archive:
     env_prefix: AWS_RA_RAW_ARCHIVE
+  # Every container that holds a secret needs an identity to read it with,
+  # because the deploy no longer carries the value (ahara-trust ADR-0002).
+  environment-sensors:
+    env_prefix: AWS_RA_ENVIRONMENT_SENSORS
+  volt:
+    env_prefix: AWS_RA_VOLT
+  volt-event:
+    env_prefix: AWS_RA_VOLT_EVENT
+  downsampling:
+    env_prefix: AWS_RA_DOWNSAMPLING
 images:
   - collectors/environment-sensors
   - collectors/volt
