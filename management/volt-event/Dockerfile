@@ -1,5 +1,23 @@
 FROM nginx:alpine
 
+ARG AWS_SIGNING_HELPER_VERSION=1.8.4
+ARG AWS_SIGNING_HELPER_SHA256=b7568acd6e1517a4e1adaee68d52bfd6284a0e5305677166cd83d43a07c815c9
+
+# The enrollment bootstrap is bash, speaks to the trust appliance over curl and
+# openssl, and reads this service's InfluxDB token itself rather than receiving
+# it from a deploy (ahara-trust ADR-0002). nginx's own entrypoint still runs
+# afterwards, so the token reaches the config template the way it always has.
+RUN apk add --no-cache bash ca-certificates curl openssl aws-cli
+
+RUN curl -fsSL \
+    "https://rolesanywhere.amazonaws.com/releases/${AWS_SIGNING_HELPER_VERSION}/X86_64/Linux/Amzn2023/aws_signing_helper" \
+    -o /usr/local/bin/aws_signing_helper \
+    && echo "${AWS_SIGNING_HELPER_SHA256}  /usr/local/bin/aws_signing_helper" | sha256sum -c - \
+    && chmod 0755 /usr/local/bin/aws_signing_helper
+
+COPY truenas-roles-anywhere-bootstrap /usr/local/bin/truenas-roles-anywhere-bootstrap
+RUN chmod 0755 /usr/local/bin/truenas-roles-anywhere-bootstrap
+
 # Copy the HTML file
 COPY index.html /usr/share/nginx/html/
 

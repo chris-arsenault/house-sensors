@@ -5,86 +5,162 @@ x-house-sensors-otel: &house-sensors-otel
   OTEL_METRICS_EXPORTER: "otlp"
   OTEL_RESOURCE_ATTRIBUTES: "service.namespace=house-sensors,deployment.environment=truenas,project=house-sensors"
   # Cognito M2M (client_credentials) auth for the observability ingest gateway.
-  OBS_INGEST_CLIENT_ID: "${OBS_INGEST_CLIENT_ID}"
-  OBS_INGEST_CLIENT_SECRET: "${OBS_INGEST_CLIENT_SECRET}"
+  # Both the id and the secret are fetched per service below. The id is a
+  # public identifier and belongs inline, but writing it here means reading the
+  # deployed value first; fetching it in the meantime costs one parameter read.
   OBS_INGEST_TOKEN_URL: "https://auth.services.ahara.io/oauth2/token"
   OBS_INGEST_SCOPE: "observability/ingest"
+
+x-house-sensors-aws: &house-sensors-aws
+  AWS_REGION: "us-east-1"
+  AWS_DEFAULT_REGION: "us-east-1"
+  AWS_SDK_LOAD_CONFIG: "1"
+
+# Two services share the downsampling image and one identity: they run on the
+# same host, on the same network, from the same image, so separate identities
+# would distinguish nothing. Nothing is mounted at the bootstrap's certificate
+# directory, so each container enrols into its own writable layer and the
+# shared id never means a shared file.
+x-house-sensors-downsampling-identity: &house-sensors-downsampling-identity
+  AWS_RA_DOWNSAMPLING_WORKLOAD_ID: "${AWS_RA_DOWNSAMPLING_WORKLOAD_ID}"
+  AWS_RA_DOWNSAMPLING_ENROLLMENT_URL: "${AWS_RA_DOWNSAMPLING_ENROLLMENT_URL}"
+  AWS_RA_DOWNSAMPLING_TRUST_ANCHOR_ARN: "${AWS_RA_DOWNSAMPLING_TRUST_ANCHOR_ARN}"
+  AWS_RA_DOWNSAMPLING_PROFILE_ARN: "${AWS_RA_DOWNSAMPLING_PROFILE_ARN}"
+  AWS_RA_DOWNSAMPLING_ENTRY_ROLE_ARN: "${AWS_RA_DOWNSAMPLING_ENTRY_ROLE_ARN}"
+  AWS_RA_DOWNSAMPLING_ROLE_ARN: "${AWS_RA_DOWNSAMPLING_ROLE_ARN}"
+  AWS_RA_DOWNSAMPLING_SECRET_INFLUX_TOKEN: "/ahara/observability/influxdb-admin-token"
 
 x-house-sensors-influx-url: &house-sensors-influx-url "http://192.168.66.3:18086"
 
 services:
   environment-sensors:
     image: ghcr.io/chris-arsenault/house-sensors/collectors/environment-sensors:${IMAGE_TAG:-latest}
+    command:
+      - /usr/local/bin/truenas-roles-anywhere-bootstrap
+      - AWS_RA_ENVIRONMENT_SENSORS
+      - --
+      - python
+      - -u
+      - env_sensor_collector.py
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
     environment:
-      <<: *house-sensors-otel
+      <<: [*house-sensors-otel, *house-sensors-aws]
       OTEL_SERVICE_NAME: "house-sensors.environment-sensors"
       INFLUX_URL: *house-sensors-influx-url
       INFLUX_ORG: "ahara"
       INFLUX_BUCKET: "environment-data"
-      INFLUX_TOKEN: "${ENV_SENSOR_INFLUX_TOKEN}"
+      AWS_RA_ENVIRONMENT_SENSORS_WORKLOAD_ID: "${AWS_RA_ENVIRONMENT_SENSORS_WORKLOAD_ID}"
+      AWS_RA_ENVIRONMENT_SENSORS_ENROLLMENT_URL: "${AWS_RA_ENVIRONMENT_SENSORS_ENROLLMENT_URL}"
+      AWS_RA_ENVIRONMENT_SENSORS_TRUST_ANCHOR_ARN: "${AWS_RA_ENVIRONMENT_SENSORS_TRUST_ANCHOR_ARN}"
+      AWS_RA_ENVIRONMENT_SENSORS_PROFILE_ARN: "${AWS_RA_ENVIRONMENT_SENSORS_PROFILE_ARN}"
+      AWS_RA_ENVIRONMENT_SENSORS_ENTRY_ROLE_ARN: "${AWS_RA_ENVIRONMENT_SENSORS_ENTRY_ROLE_ARN}"
+      AWS_RA_ENVIRONMENT_SENSORS_ROLE_ARN: "${AWS_RA_ENVIRONMENT_SENSORS_ROLE_ARN}"
+      # What this container reads for itself at start. Paths, not values.
+      AWS_RA_ENVIRONMENT_SENSORS_SECRET_INFLUX_TOKEN: "/ahara/observability/influxdb-admin-token"
+      AWS_RA_ENVIRONMENT_SENSORS_SECRET_COLLECTOR_TOKEN: "/ahara/house-sensors/collector/api-token"
+      AWS_RA_ENVIRONMENT_SENSORS_SECRET_OBS_INGEST_CLIENT_ID: "/ahara/observability/ingest-client-id"
+      AWS_RA_ENVIRONMENT_SENSORS_SECRET_OBS_INGEST_CLIENT_SECRET: "/ahara/observability/ingest-client-secret"
       # Sensors live on the IoT LAN beside the collector appliance, which
       # holds the device credentials and does the discovery and polling;
       # this collector drains its envSensors stream (ahara-collector
       # ADR-0006/0007) and owns the environment schema.
       COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.30.2:8850}"
-      COLLECTOR_TOKEN: "${COLLECTOR_TOKEN}"
 
   volt:
     image: ghcr.io/chris-arsenault/house-sensors/collectors/volt:${IMAGE_TAG:-latest}
     container_name: volt
+    command:
+      - /usr/local/bin/truenas-roles-anywhere-bootstrap
+      - AWS_RA_VOLT
+      - --
+      - python
+      - -u
+      - voltage_collector.py
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
     environment:
-      <<: *house-sensors-otel
+      <<: [*house-sensors-otel, *house-sensors-aws]
       OTEL_SERVICE_NAME: "house-sensors.volt"
       INFLUXDB_URL: *house-sensors-influx-url
-      INFLUXDB_TOKEN: "${VOLT_INFLUXDB_TOKEN}"
       INFLUXDB_ORG: "ahara"
       INFLUXDB_BUCKET: "voltage-data"
+      AWS_RA_VOLT_WORKLOAD_ID: "${AWS_RA_VOLT_WORKLOAD_ID}"
+      AWS_RA_VOLT_ENROLLMENT_URL: "${AWS_RA_VOLT_ENROLLMENT_URL}"
+      AWS_RA_VOLT_TRUST_ANCHOR_ARN: "${AWS_RA_VOLT_TRUST_ANCHOR_ARN}"
+      AWS_RA_VOLT_PROFILE_ARN: "${AWS_RA_VOLT_PROFILE_ARN}"
+      AWS_RA_VOLT_ENTRY_ROLE_ARN: "${AWS_RA_VOLT_ENTRY_ROLE_ARN}"
+      AWS_RA_VOLT_ROLE_ARN: "${AWS_RA_VOLT_ROLE_ARN}"
+      # What this container reads for itself at start. Paths, not values.
+      AWS_RA_VOLT_SECRET_INFLUXDB_TOKEN: "/ahara/observability/influxdb-admin-token"
+      AWS_RA_VOLT_SECRET_COLLECTOR_TOKEN: "/ahara/house-sensors/collector/api-token"
+      AWS_RA_VOLT_SECRET_OBS_INGEST_CLIENT_ID: "/ahara/observability/ingest-client-id"
+      AWS_RA_VOLT_SECRET_OBS_INGEST_CLIENT_SECRET: "/ahara/observability/ingest-client-secret"
       # Plugs live on the IoT LAN beside the collector appliance, which
       # holds the Kasa credentials and speaks KLAP; this collector drains
       # its kasa stream (ahara-collector ADR-0006/0007) and owns the
       # voltage_monitoring schema.
       COLLECTOR_URL: "${COLLECTOR_URL:-http://192.168.30.2:8850}"
-      COLLECTOR_TOKEN: "${COLLECTOR_TOKEN}"
 
   volt-event:
     image: ghcr.io/chris-arsenault/house-sensors/management/volt-event:${IMAGE_TAG:-latest}
+    # The bootstrap fetches the token and then hands off to nginx's own
+    # entrypoint, which is what expands the config template.
+    command:
+      - /usr/local/bin/truenas-roles-anywhere-bootstrap
+      - AWS_RA_VOLT_EVENT
+      - --
+      - /docker-entrypoint.sh
+      - nginx
+      - -g
+      - "daemon off;"
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
     environment:
+      <<: *house-sensors-aws
       INFLUX_URL: *house-sensors-influx-url
       INFLUX_ORG: "ahara"
       INFLUX_BUCKET: "voltage-data"
-      INFLUX_TOKEN: "${VOLT_EVENT_INFLUX_TOKEN}"
+      AWS_RA_VOLT_EVENT_WORKLOAD_ID: "${AWS_RA_VOLT_EVENT_WORKLOAD_ID}"
+      AWS_RA_VOLT_EVENT_ENROLLMENT_URL: "${AWS_RA_VOLT_EVENT_ENROLLMENT_URL}"
+      AWS_RA_VOLT_EVENT_TRUST_ANCHOR_ARN: "${AWS_RA_VOLT_EVENT_TRUST_ANCHOR_ARN}"
+      AWS_RA_VOLT_EVENT_PROFILE_ARN: "${AWS_RA_VOLT_EVENT_PROFILE_ARN}"
+      AWS_RA_VOLT_EVENT_ENTRY_ROLE_ARN: "${AWS_RA_VOLT_EVENT_ENTRY_ROLE_ARN}"
+      AWS_RA_VOLT_EVENT_ROLE_ARN: "${AWS_RA_VOLT_EVENT_ROLE_ARN}"
+      # What this container reads for itself at start. Paths, not values.
+      AWS_RA_VOLT_EVENT_SECRET_INFLUX_TOKEN: "/ahara/observability/influxdb-admin-token"
     ports:
       - "192.168.66.3:8085:80"
 
   downsampling-medium:
     image: ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG:-latest}
-    command: ["python", "-u", "raw_to_medium.py", "run-loop"]
+    command:
+      - /usr/local/bin/truenas-roles-anywhere-bootstrap
+      - AWS_RA_DOWNSAMPLING
+      - --
+      - python
+      - -u
+      - raw_to_medium.py
+      - run-loop
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
     environment:
-      <<: *house-sensors-otel
+      <<: [*house-sensors-otel, *house-sensors-aws, *house-sensors-downsampling-identity]
       OTEL_SERVICE_NAME: "house-sensors.downsampling-medium"
       INFLUX_URL: *house-sensors-influx-url
       INFLUX_ORG: "ahara"
-      INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
       DOWNSAMPLE_RAW_POWER_BUCKET: "voltage-data"
       DOWNSAMPLE_RAW_ENV_BUCKET: "environment-data"
       DOWNSAMPLE_MEDIUM_BUCKET: "sensors-medium"
@@ -113,18 +189,24 @@ services:
 
   downsampling-long:
     image: ghcr.io/chris-arsenault/house-sensors/jobs/downsampling:${IMAGE_TAG:-latest}
-    command: ["python", "-u", "medium_to_long_backfill.py", "run-loop"]
+    command:
+      - /usr/local/bin/truenas-roles-anywhere-bootstrap
+      - AWS_RA_DOWNSAMPLING
+      - --
+      - python
+      - -u
+      - medium_to_long_backfill.py
+      - run-loop
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
     environment:
-      <<: *house-sensors-otel
+      <<: [*house-sensors-otel, *house-sensors-aws, *house-sensors-downsampling-identity]
       OTEL_SERVICE_NAME: "house-sensors.downsampling-long"
       INFLUX_URL: *house-sensors-influx-url
       INFLUX_ORG: "ahara"
-      INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
       DOWNSAMPLE_SRC_BUCKET: "sensors-medium"
       DOWNSAMPLE_DST_BUCKET: "sensors-long"
       DOWNSAMPLE_MEASUREMENT: "sensors"
@@ -168,17 +250,19 @@ services:
       OTEL_SERVICE_NAME: "house-sensors.raw-archive-cleanup"
       INFLUX_URL: *house-sensors-influx-url
       INFLUX_ORG: "ahara"
-      INFLUX_TOKEN: "${DOWNSAMPLER_INFLUX_TOKEN}"
       AWS_REGION: "us-east-1"
       AWS_DEFAULT_REGION: "us-east-1"
       AWS_SDK_LOAD_CONFIG: "1"
+      # This one already enrolled to reach S3; the token and the bucket name
+      # are now read the same way instead of arriving from the deploy.
+      AWS_RA_RAW_ARCHIVE_SECRET_INFLUX_TOKEN: "/ahara/observability/influxdb-admin-token"
+      AWS_RA_RAW_ARCHIVE_SECRET_RAW_ARCHIVE_S3_BUCKET: "/ahara/house-sensors/raw-archive/s3-bucket"
       AWS_RA_RAW_ARCHIVE_WORKLOAD_ID: "${AWS_RA_RAW_ARCHIVE_WORKLOAD_ID}"
       AWS_RA_RAW_ARCHIVE_ENROLLMENT_URL: "${AWS_RA_RAW_ARCHIVE_ENROLLMENT_URL}"
       AWS_RA_RAW_ARCHIVE_TRUST_ANCHOR_ARN: "${AWS_RA_RAW_ARCHIVE_TRUST_ANCHOR_ARN}"
       AWS_RA_RAW_ARCHIVE_PROFILE_ARN: "${AWS_RA_RAW_ARCHIVE_PROFILE_ARN}"
       AWS_RA_RAW_ARCHIVE_ENTRY_ROLE_ARN: "${AWS_RA_RAW_ARCHIVE_ENTRY_ROLE_ARN}"
       AWS_RA_RAW_ARCHIVE_ROLE_ARN: "${AWS_RA_RAW_ARCHIVE_ROLE_ARN}"
-      RAW_ARCHIVE_S3_BUCKET: "${RAW_ARCHIVE_S3_BUCKET}"
       RAW_ARCHIVE_S3_PREFIX: "house-sensors/raw"
       RAW_ARCHIVE_RAW_BUCKETS: "environment-data,voltage-data"
       RAW_ARCHIVE_MEDIUM_BUCKET: "sensors-medium"
