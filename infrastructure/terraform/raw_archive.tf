@@ -76,6 +76,13 @@ module "truenas_raw_archive_role" {
   prefix      = local.prefix
   name        = "raw-archive"
   policy_json = data.aws_iam_policy_document.raw_archive_runtime.json
+
+  # raw-archive-cleanup runs on this identity and reads the household InfluxDB
+  # token, which is the observability project's parameter. Declared here as
+  # well as on the collectors in workload_identities.tf, because this role is
+  # created separately.
+  cross_project_parameter_prefixes = ["observability"]
+
   permissions_boundary_arn = (
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/pb-${local.prefix}-truenas-workload"
   )
