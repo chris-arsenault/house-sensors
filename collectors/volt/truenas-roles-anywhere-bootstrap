@@ -290,12 +290,18 @@ if [ -n "${secret_names}" ]; then
       exit 1
     fi
 
+    # Report what AWS said rather than guessing why. A message asserting the
+    # path is wrong sends the reader after the path when the cause was a
+    # missing client, an unusable signing helper, or a denied role.
+    error_file="$(mktemp)"
     if ! value="$(aws ssm get-parameter --name "${path}" --with-decryption \
-      --query Parameter.Value --output text 2>/dev/null)"; then
+      --query Parameter.Value --output text 2>"${error_file}")"; then
       echo "Cannot read ${path} for ${name}." >&2
-      echo "This workload's role grants its own project's namespace; check the path." >&2
+      sed 's/^/AWS CLI: /' "${error_file}" >&2
+      rm -f "${error_file}"
       exit 1
     fi
+    rm -f "${error_file}"
     if [ -z "${value}" ] || [ "${value}" = "None" ]; then
       echo "${path} resolved to nothing" >&2
       exit 1
