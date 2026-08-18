@@ -25,6 +25,11 @@ COPY requirements.txt ./
 RUN python -m pip install --upgrade pip && \
     python -m pip install -r requirements.txt
 
+# These jobs read their own secrets at start, which the bootstrap does with the
+# AWS CLI (ahara-trust ADR-0002). The signing helper above obtains credentials;
+# it is not a substitute for a client.
+RUN python -m pip install awscli
+
 COPY *.py ./
 COPY truenas-roles-anywhere-bootstrap /usr/local/bin/truenas-roles-anywhere-bootstrap
 RUN chmod 0755 /usr/local/bin/truenas-roles-anywhere-bootstrap

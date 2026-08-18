@@ -1,4 +1,7 @@
-FROM nginx:alpine
+# Debian rather than Alpine: aws_signing_helper is published as a glibc binary
+# and will not exec against musl, which presents as "not found" and then as a
+# container that cannot read its own token.
+FROM nginx:bookworm
 
 ARG AWS_SIGNING_HELPER_VERSION=1.8.4
 ARG AWS_SIGNING_HELPER_SHA256=b7568acd6e1517a4e1adaee68d52bfd6284a0e5305677166cd83d43a07c815c9
@@ -7,7 +10,13 @@ ARG AWS_SIGNING_HELPER_SHA256=b7568acd6e1517a4e1adaee68d52bfd6284a0e5305677166cd
 # openssl, and reads this service's InfluxDB token itself rather than receiving
 # it from a deploy (ahara-trust ADR-0002). nginx's own entrypoint still runs
 # afterwards, so the token reaches the config template the way it always has.
-RUN apk add --no-cache bash ca-certificates curl openssl aws-cli
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    awscli \
+    bash \
+    ca-certificates \
+    curl \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL \
     "https://rolesanywhere.amazonaws.com/releases/${AWS_SIGNING_HELPER_VERSION}/X86_64/Linux/Amzn2023/aws_signing_helper" \
